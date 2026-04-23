@@ -1,7 +1,7 @@
 import Groq from 'groq-sdk';
 import * as lp from './lpagent.js';
 
-const MODEL = 'llama-3.1-8b-instant';
+const MODEL = 'llama-3.3-70b-versatile';
 
 // Lazy client — created on first call so dotenv has already populated process.env.
 let _groqClient: Groq | null = null;
@@ -47,13 +47,15 @@ RESPONSE STYLE:
 - Always cite specific numbers (APR%, TVL in $M, fee %, bin IDs)
 - Flag out-of-range positions prominently
 
-Remember: percentX of 0.5 means 50/50 split. slippage_bps of 500 = 5% slippage.`;
+Remember: percentX of 0.5 means 50/50 split. slippage_bps of 500 = 5% slippage.
+
+IMPORTANT: Only mention specific pool data (APR, TVL, pool names) when the user explicitly asks about pools, liquidity, or LP strategies. For general crypto questions, answer generally without listing pool data. Never volunteer pool recommendations unless asked.`;
 
 // Regex for a Solana base58 public key (32–44 chars, no 0/O/I/l)
 const WALLET_RE = /[1-9A-HJ-NP-Za-km-z]{32,44}/g;
 
-// Keywords that suggest the user wants pool recommendations shown as cards
-const POOL_QUERY_RE = /pool|lp\b|liquidity|invest|add|deposit|stake|yield|apr|farm|sol|usdc|usdt|jup|bonk|wif|meme/i;
+// Keywords that trigger pool cards — "invest" alone does NOT qualify
+const POOL_QUERY_RE = /\bpool\b|\blp\b|liquidity|zap|add liquidity|invest in pool|deposit/i;
 
 export interface AdvisorResult {
   text: string;
@@ -70,7 +72,7 @@ export async function runAdvisor(
   const client = getClient();
 
   // ── 1. Pre-fetch pool data ────────────────────────────────────────────────
-  const poolsRes = await lp.discoverPools({ sortBy: 'vol_24h', sortOrder: 'desc', pageSize: 10 });
+  const poolsRes = await lp.discoverPools({ sortBy: 'vol_24h', sortOrder: 'desc', pageSize: 5 });
   const pools = (poolsRes as { data?: unknown[] }).data ?? [];
 
   // Enrich each pool with activeBin + currentPrice from pool info
@@ -138,9 +140,9 @@ function slimPool(pool: PoolRaw) {
     apr: pool.apr,
     tvl: pool.tvl,
     volume24h: pool.volume24h,
-    strategy: pool.strategy,
-    activeBin: pool.activeBin,
     binStep: pool.binStep,
+    activeBin: pool.activeBin,
+    protocol: pool.protocol,
   };
 }
 
