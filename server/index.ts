@@ -1,4 +1,8 @@
-import 'dotenv/config';
+// Load .env FIRST, before any other import reads process.env.
+// override:true ensures .env values win over stale shell variables.
+import { config as loadEnv } from 'dotenv';
+loadEnv({ override: true });
+
 import express from 'express';
 import cors from 'cors';
 import { chatRouter } from './routes/chat.js';
@@ -26,8 +30,9 @@ app.get('/health', (_req, res) => {
 });
 
 app.listen(PORT, () => {
+  const groqKey = process.env.GROQ_API_KEY ?? '';
   console.log(`\n  LP Advisor backend → http://localhost:${PORT}`);
   console.log(`  Mock mode: ${process.env.USE_MOCK !== 'false'}`);
-  console.log(`  Anthropic key: ${process.env.ANTHROPIC_API_KEY ? '✓ set' : '✗ missing'}`);
+  console.log(`  Groq key:      ${groqKey ? `✓ set (${groqKey.slice(0, 10)}…)` : '✗ MISSING — chat will fail'}`);
   console.log(`  LP Agent key:  ${process.env.LPAGENT_API_KEY ? '✓ set' : '✗ missing (mock ok)'}\n`);
 });

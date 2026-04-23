@@ -1,7 +1,23 @@
-import Anthropic from '@anthropic-ai/sdk';
+import Groq from 'groq-sdk';
 import * as lp from './lpagent.js';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const MODEL = 'llama-3.3-70b-versatile';
+
+// Lazy client — created on first call so process.env is guaranteed to be
+// populated by dotenv (which runs in server/index.ts before any request arrives).
+let _groqClient: Groq | null = null;
+
+function getClient(): Groq {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) {
+    throw new Error('GROQ_API_KEY is not set. Add it to your .env file.');
+  }
+  if (!_groqClient) {
+    _groqClient = new Groq({ apiKey: key });
+    console.log(`  [groq] client initialised with key ${key.slice(0, 10)}…`);
+  }
+  return _groqClient;
+}
 
 const SYSTEM_PROMPT = `You are LP Advisor, an expert AI assistant for Meteora DLMM and DAMM V2 liquidity providers on Solana.
 
@@ -37,77 +53,90 @@ RESPONSE STYLE:
 
 Remember: percentX of 0.5 means 50% SOL / 50% USDC in the zap-in. slippage_bps of 500 = 5%.`;
 
-const TOOLS: Anthropic.Tool[] = [
+// Groq uses OpenAI-compatible tool format: function.parameters (not input_schema)
+const TOOLS: Groq.Chat.ChatCompletionTool[] = [
   {
-    name: 'discover_pools',
-    description:
-      'Find Meteora liquidity pools filtered by token pair, TVL, and volume. Use this to find pools matching the user\'s desired token pair or risk profile.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        tokenPair: {
-          type: 'string',
-          description: 'Token pair to search for, e.g. "SOL-USDC", "SOL", "USDC". Optional.',
-        },
-        sortBy: {
-          type: 'string',
-          enum: ['vol_24h', 'tvl', 'apr'],
-          description: 'Sort pools by this metric. Default: vol_24h',
-        },
-        sortOrder: {
-          type: 'string',
-          enum: ['asc', 'desc'],
-          description: 'Sort direction. Default: desc',
-        },
-        pageSize: {
-          type: 'number',
-          description: 'Number of pools to return (max 20). Default: 5',
+    type: 'function',
+    function: {
+      name: 'discover_pools',
+      description:
+        "Find Meteora liquidity pools filtered by token pair, TVL, and volume. Use this to find pools matching the user's desired token pair or risk profile.",
+      parameters: {
+        type: 'object',
+        properties: {
+          tokenPair: {
+            type: 'string',
+            description: 'Token pair to search for, e.g. "SOL-USDC", "SOL", "USDC". Optional.',
+          },
+          sortBy: {
+            type: 'string',
+            enum: ['vol_24h', 'tvl', 'apr'],
+            description: 'Sort pools by this metric. Default: vol_24h',
+          },
+          sortOrder: {
+            type: 'string',
+            enum: ['asc', 'desc'],
+            description: 'Sort direction. Default: desc',
+          },
+          pageSize: {
+            type: 'number',
+            description: 'Number of pools to return (max 20). Default: 5',
+          },
         },
       },
     },
   },
   {
-    name: 'get_pool_info',
-    description:
-      'Get detailed info for a specific pool including the active bin (current price point). Required before generating a liquidity range recommendation.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        poolId: {
-          type: 'string',
-          description: 'The pool address (from discover_pools results)',
+    type: 'function',
+    function: {
+      name: 'get_pool_info',
+      description:
+        'Get detailed info for a specific pool including the active bin (current price point). Required before generating a liquidity range recommendation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          poolId: {
+            type: 'string',
+            description: 'The pool address (from discover_pools results)',
+          },
         },
+        required: ['poolId'],
       },
-      required: ['poolId'],
     },
   },
   {
-    name: 'get_positions',
-    description: "Fetch all currently open LP positions for a wallet address.",
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        owner: {
-          type: 'string',
-          description: 'Solana wallet address (base58)',
+    type: 'function',
+    function: {
+      name: 'get_positions',
+      description: 'Fetch all currently open LP positions for a wallet address.',
+      parameters: {
+        type: 'object',
+        properties: {
+          owner: {
+            type: 'string',
+            description: 'Solana wallet address (base58)',
+          },
         },
+        required: ['owner'],
       },
-      required: ['owner'],
     },
   },
   {
-    name: 'get_portfolio_overview',
-    description:
-      'Get aggregate portfolio metrics for a wallet: total value, total P&L, total fees earned, position count.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        owner: {
-          type: 'string',
-          description: 'Solana wallet address (base58)',
+    type: 'function',
+    function: {
+      name: 'get_portfolio_overview',
+      description:
+        'Get aggregate portfolio metrics for a wallet: total value, total P&L, total fees earned, position count.',
+      parameters: {
+        type: 'object',
+        properties: {
+          owner: {
+            type: 'string',
+            description: 'Solana wallet address (base58)',
+          },
         },
+        required: ['owner'],
       },
-      required: ['owner'],
     },
   },
 ];
@@ -124,61 +153,61 @@ export interface AdvisorResult {
 export async function runAdvisor(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<AdvisorResult> {
+  const client = getClient(); // reads process.env at call-time, not module init
   const result: AdvisorResult = { text: '', toolData: {} };
 
-  let currentMessages: Anthropic.MessageParam[] = messages.map((m) => ({
-    role: m.role,
-    content: m.content,
-  }));
+  // Groq/OpenAI: system prompt goes as first message in the array
+  let currentMessages: Groq.Chat.ChatCompletionMessageParam[] = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...messages.map((m) => ({ role: m.role, content: m.content })),
+  ];
 
-  // Agentic loop — keeps going until Claude returns end_turn
+  // Agentic loop — keeps going until the model returns finish_reason 'stop'
   for (let iterations = 0; iterations < 8; iterations++) {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const response = await client.chat.completions.create({
+      model: MODEL,
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      tools: TOOLS,
       messages: currentMessages,
+      tools: TOOLS,
+      tool_choice: 'auto',
     });
 
-    if (response.stop_reason === 'end_turn') {
-      const textBlock = response.content.find(
-        (b): b is Anthropic.TextBlock => b.type === 'text'
-      );
-      result.text = textBlock?.text ?? '';
+    const choice = response.choices[0];
+
+    if (choice.finish_reason === 'stop') {
+      result.text = choice.message.content ?? '';
       break;
     }
 
-    if (response.stop_reason === 'tool_use') {
-      const toolUses = response.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
-      );
+    if (choice.finish_reason === 'tool_calls') {
+      const toolCalls = choice.message.tool_calls ?? [];
 
-      // Run all tool calls in parallel
+      // Append the assistant turn (with tool_calls) to history
+      currentMessages.push({
+        role: 'assistant',
+        content: choice.message.content ?? null,
+        tool_calls: toolCalls,
+      });
+
+      // Execute all tool calls in parallel, then append each as a 'tool' message
       const toolResults = await Promise.all(
-        toolUses.map(async (tu) => {
-          const content = await processToolCall(
-            tu.name,
-            tu.input as Record<string, unknown>,
-            result
-          );
+        toolCalls.map(async (tc) => {
+          const input = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+          const content = await processToolCall(tc.function.name, input, result);
           return {
-            type: 'tool_result' as const,
-            tool_use_id: tu.id,
+            role: 'tool' as const,
+            tool_call_id: tc.id,
             content: JSON.stringify(content),
           };
         })
       );
 
-      currentMessages = [
-        ...currentMessages,
-        { role: 'assistant' as const, content: response.content },
-        { role: 'user' as const, content: toolResults },
-      ];
+      currentMessages.push(...toolResults);
       continue;
     }
 
-    // Unexpected stop reason
+    // Unexpected finish_reason (e.g. 'length') — surface whatever text we have
+    result.text = choice.message.content ?? '';
     break;
   }
 
@@ -198,8 +227,7 @@ async function processToolCall(
       return res;
     }
     case 'get_pool_info': {
-      const res = await lp.getPoolInfo(input.poolId as string);
-      return res;
+      return lp.getPoolInfo(input.poolId as string);
     }
     case 'get_positions': {
       const res = await lp.getOpenPositions(input.owner as string);
