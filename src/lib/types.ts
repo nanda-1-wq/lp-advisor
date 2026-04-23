@@ -20,6 +20,9 @@ export interface Pool {
 }
 
 export interface PoolInfo extends Pool {
+  /** Top-level fields for easy AI access — mirrors liquidityViz.activeBin */
+  activeBin: number;
+  currentPrice: number;
   liquidityViz: {
     activeBin: { binId: number; price: number };
     bins: { binId: number; liquidity: number }[];

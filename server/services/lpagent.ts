@@ -67,10 +67,12 @@ export async function getPoolInfo(poolId: string) {
   if (USE_MOCK) {
     const info =
       mock.MOCK_POOL_INFO[poolId] ??
-      // Fallback: generate info for any poolId using first pool template
+      // Fallback for unknown poolIds in demo mode
       {
         ...mock.MOCK_POOLS[0],
         address: poolId,
+        activeBin: 8388,
+        currentPrice: 174.5,
         liquidityViz: {
           activeBin: { binId: 8388, price: 174.5 },
           bins: [],

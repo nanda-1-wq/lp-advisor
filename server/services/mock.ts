@@ -80,8 +80,11 @@ export const MOCK_POOLS: Pool[] = [
 // ─── Pool Info ────────────────────────────────────────────────────────────────
 
 export const MOCK_POOL_INFO: Record<string, PoolInfo> = {
+  // SOL-USDC  (binStep 10 → each bin ≈ 0.1% price move)
   'FoSDw2L5DmTuQTFe55gWPDXf88euaxAEKFre74CnvQbX': {
     ...MOCK_POOLS[0],
+    activeBin: 8388,
+    currentPrice: 174.50,
     liquidityViz: {
       activeBin: { binId: 8388, price: 174.50 },
       bins: Array.from({ length: 60 }, (_, i) => ({
@@ -90,8 +93,11 @@ export const MOCK_POOL_INFO: Record<string, PoolInfo> = {
       })),
     },
   },
+  // SOL-USDT  (binStep 5 → tighter range than SOL-USDC)
   '2sf5NYcGSBW7ScNwJa2rSBG9JcNwHn24K3N8VAQzAa4z': {
     ...MOCK_POOLS[1],
+    activeBin: 8390,
+    currentPrice: 173.80,
     liquidityViz: {
       activeBin: { binId: 8390, price: 173.80 },
       bins: Array.from({ length: 60 }, (_, i) => ({
@@ -100,8 +106,11 @@ export const MOCK_POOL_INFO: Record<string, PoolInfo> = {
       })),
     },
   },
+  // JUP-USDC  (binStep 20 → each bin ≈ 0.2% price move)
   '7qbRF6YsyGuLUVs6Y1q64bdVrfe4ZcV3FPDAI8KAXKF': {
     ...MOCK_POOLS[2],
+    activeBin: 5148,
+    currentPrice: 0.840,
     liquidityViz: {
       activeBin: { binId: 5148, price: 0.840 },
       bins: Array.from({ length: 60 }, (_, i) => ({
@@ -110,13 +119,42 @@ export const MOCK_POOL_INFO: Record<string, PoolInfo> = {
       })),
     },
   },
+  // BONK-SOL  (binStep 80 → wide bins for volatile meme coin)
+  '3AMhFKqHVxSJMpzPNFWRVoiKCcmEfqPTEhRKFvU9MbJF': {
+    ...MOCK_POOLS[3],
+    activeBin: 450,
+    currentPrice: 0.0000215,
+    liquidityViz: {
+      activeBin: { binId: 450, price: 0.0000215 },
+      bins: Array.from({ length: 60 }, (_, i) => ({
+        binId: 422 + i,
+        liquidity: 250_000 + Math.random() * 120_000,
+      })),
+    },
+  },
+  // WIF-USDC  (binStep 100 → very wide bins for volatile asset)
   '5BtRAQvXCbqmFjbJG9YqJn6gFuN6Hk7H1B4q2xQ4jKH': {
     ...MOCK_POOLS[4],
+    activeBin: 7380,
+    currentPrice: 0.350,
     liquidityViz: {
-      activeBin: { binId: 7380, price: 0.35 },
+      activeBin: { binId: 7380, price: 0.350 },
       bins: Array.from({ length: 60 }, (_, i) => ({
         binId: 7352 + i,
         liquidity: 400_000 + Math.random() * 200_000,
+      })),
+    },
+  },
+  // USDC-USDT  (binStep 1 → extremely tight stable-pair range)
+  'HJPjoWUrhoZzkNfRpHuieeFk9WcZWjwy6PBjZ81ngndJ': {
+    ...MOCK_POOLS[5],
+    activeBin: 8000,
+    currentPrice: 1.0002,
+    liquidityViz: {
+      activeBin: { binId: 8000, price: 1.0002 },
+      bins: Array.from({ length: 60 }, (_, i) => ({
+        binId: 7972 + i,
+        liquidity: 2_000_000 + Math.random() * 500_000,
       })),
     },
   },

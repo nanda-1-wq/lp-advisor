@@ -1,10 +1,9 @@
 import Groq from 'groq-sdk';
 import * as lp from './lpagent.js';
 
-const MODEL = 'llama-3.3-70b-versatile';
+const MODEL = 'llama-3.1-8b-instant';
 
-// Lazy client — created on first call so process.env is guaranteed to be
-// populated by dotenv (which runs in server/index.ts before any request arrives).
+// Lazy client — created on first call so dotenv has already populated process.env.
 let _groqClient: Groq | null = null;
 
 function getClient(): Groq {
@@ -32,114 +31,29 @@ STRATEGY GUIDE:
 - Curve: Concentrated around the current price, best for range-bound assets. Higher fees but more IL risk
 - BidAsk: Two-sided liquidity, wider range, best for volatile assets (meme coins). Captures big moves at the cost of lower capital efficiency
 
-WHEN ADDING LIQUIDITY:
-1. Call discover_pools to find matching pools for the user's token pair preference
-2. For the top result, call get_pool_info to get the active bin (current price)
-3. Calculate a range: ±34 bins for Spot/Curve, ±70 bins for BidAsk (from the active bin)
-4. Present: pool name, TVL, APR, fee rate, your recommended strategy + range, and clear rationale
-5. End with "Shall I proceed with this recommendation?"
+WHEN RECOMMENDING A POOL:
+1. Pick the best match from the POOLS data provided below
+2. Use the pool's activeBin and binStep to calculate the range: fromBinId = activeBin - 34, toBinId = activeBin + 34 (use ±70 for BidAsk)
+3. State: pool name, TVL, APR, fee rate, recommended strategy, exact fromBinId/toBinId, and why
+4. End with "Shall I proceed with this recommendation?"
 
-WHEN ANALYZING PORTFOLIO:
-1. Call get_positions with the wallet address
-2. Call get_portfolio_overview for totals
-3. Highlight: out-of-range positions (urgent — collecting zero fees), best/worst performers, total fees earned
-4. Be specific with dollar amounts
+WHEN ANALYZING A PORTFOLIO:
+1. Use the POSITIONS and OVERVIEW data provided below
+2. Highlight out-of-range positions urgently — they collect zero fees
+3. Give specific dollar amounts for P&L and fees earned
 
 RESPONSE STYLE:
-- Concise but complete. Use markdown for structure where helpful.
-- Always include specific numbers (APR%, TVL in $M, fee %)
-- Flag out-of-range positions prominently — they're costing the user money
-- When recommending a pool, always state WHY it's the best choice
+- Concise but complete. Use markdown for structure.
+- Always cite specific numbers (APR%, TVL in $M, fee %, bin IDs)
+- Flag out-of-range positions prominently
 
-Remember: percentX of 0.5 means 50% SOL / 50% USDC in the zap-in. slippage_bps of 500 = 5%.`;
+Remember: percentX of 0.5 means 50/50 split. slippage_bps of 500 = 5% slippage.`;
 
-// Groq uses OpenAI-compatible tool format: function.parameters (not input_schema)
-const TOOLS: Groq.Chat.ChatCompletionTool[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'discover_pools',
-      description:
-        "Find Meteora liquidity pools filtered by token pair, TVL, and volume. Use this to find pools matching the user's desired token pair or risk profile.",
-      parameters: {
-        type: 'object',
-        properties: {
-          tokenPair: {
-            type: 'string',
-            description: 'Token pair to search for, e.g. "SOL-USDC", "SOL", "USDC". Optional.',
-          },
-          sortBy: {
-            type: 'string',
-            enum: ['vol_24h', 'tvl', 'apr'],
-            description: 'Sort pools by this metric. Default: vol_24h',
-          },
-          sortOrder: {
-            type: 'string',
-            enum: ['asc', 'desc'],
-            description: 'Sort direction. Default: desc',
-          },
-          pageSize: {
-            type: 'number',
-            description: 'Number of pools to return (max 20). Default: 5',
-          },
-        },
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_pool_info',
-      description:
-        'Get detailed info for a specific pool including the active bin (current price point). Required before generating a liquidity range recommendation.',
-      parameters: {
-        type: 'object',
-        properties: {
-          poolId: {
-            type: 'string',
-            description: 'The pool address (from discover_pools results)',
-          },
-        },
-        required: ['poolId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_positions',
-      description: 'Fetch all currently open LP positions for a wallet address.',
-      parameters: {
-        type: 'object',
-        properties: {
-          owner: {
-            type: 'string',
-            description: 'Solana wallet address (base58)',
-          },
-        },
-        required: ['owner'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_portfolio_overview',
-      description:
-        'Get aggregate portfolio metrics for a wallet: total value, total P&L, total fees earned, position count.',
-      parameters: {
-        type: 'object',
-        properties: {
-          owner: {
-            type: 'string',
-            description: 'Solana wallet address (base58)',
-          },
-        },
-        required: ['owner'],
-      },
-    },
-  },
-];
+// Regex for a Solana base58 public key (32–44 chars, no 0/O/I/l)
+const WALLET_RE = /[1-9A-HJ-NP-Za-km-z]{32,44}/g;
+
+// Keywords that suggest the user wants pool recommendations shown as cards
+const POOL_QUERY_RE = /pool|lp\b|liquidity|invest|add|deposit|stake|yield|apr|farm|sol|usdc|usdt|jup|bonk|wif|meme/i;
 
 export interface AdvisorResult {
   text: string;
@@ -153,94 +67,117 @@ export interface AdvisorResult {
 export async function runAdvisor(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<AdvisorResult> {
-  const client = getClient(); // reads process.env at call-time, not module init
-  const result: AdvisorResult = { text: '', toolData: {} };
+  const client = getClient();
 
-  // Groq/OpenAI: system prompt goes as first message in the array
-  let currentMessages: Groq.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    ...messages.map((m) => ({ role: m.role, content: m.content })),
-  ];
+  // ── 1. Pre-fetch pool data ────────────────────────────────────────────────
+  const poolsRes = await lp.discoverPools({ sortBy: 'vol_24h', sortOrder: 'desc', pageSize: 10 });
+  const pools = (poolsRes as { data?: unknown[] }).data ?? [];
 
-  // Agentic loop — keeps going until the model returns finish_reason 'stop'
-  for (let iterations = 0; iterations < 8; iterations++) {
-    const response = await client.chat.completions.create({
-      model: MODEL,
-      max_tokens: 4096,
-      messages: currentMessages,
-      tools: TOOLS,
-      tool_choice: 'auto',
-    });
+  // Enrich each pool with activeBin + currentPrice from pool info
+  const richPools = await Promise.all(
+    (pools as Array<{ address: string }>).map(async (pool) => {
+      const infoRes = await lp.getPoolInfo(pool.address);
+      const info = (infoRes as { data?: Record<string, unknown> }).data ?? {};
+      return { ...pool, activeBin: info.activeBin, currentPrice: info.currentPrice };
+    })
+  );
 
-    const choice = response.choices[0];
+  // ── 2. Detect wallet address anywhere in the conversation ─────────────────
+  const allText = messages.map((m) => m.content).join(' ');
+  const walletMatches = allText.match(WALLET_RE) ?? [];
+  // Take the longest match (full public keys are 44 chars; filter out short words)
+  const wallet = walletMatches.find((m) => m.length >= 32) ?? null;
 
-    if (choice.finish_reason === 'stop') {
-      result.text = choice.message.content ?? '';
-      break;
-    }
-
-    if (choice.finish_reason === 'tool_calls') {
-      const toolCalls = choice.message.tool_calls ?? [];
-
-      // Append the assistant turn (with tool_calls) to history
-      currentMessages.push({
-        role: 'assistant',
-        content: choice.message.content ?? null,
-        tool_calls: toolCalls,
-      });
-
-      // Execute all tool calls in parallel, then append each as a 'tool' message
-      const toolResults = await Promise.all(
-        toolCalls.map(async (tc) => {
-          const input = JSON.parse(tc.function.arguments) as Record<string, unknown>;
-          const content = await processToolCall(tc.function.name, input, result);
-          return {
-            role: 'tool' as const,
-            tool_call_id: tc.id,
-            content: JSON.stringify(content),
-          };
-        })
-      );
-
-      currentMessages.push(...toolResults);
-      continue;
-    }
-
-    // Unexpected finish_reason (e.g. 'length') — surface whatever text we have
-    result.text = choice.message.content ?? '';
-    break;
+  // ── 3. Pre-fetch position data if a wallet was found ─────────────────────
+  let positions: unknown[] = [];
+  let overview: unknown = null;
+  if (wallet) {
+    const [posRes, ovRes] = await Promise.all([
+      lp.getOpenPositions(wallet),
+      lp.getPortfolioOverview(wallet),
+    ]);
+    positions = (posRes as { data?: unknown[] }).data ?? [];
+    overview = (ovRes as { data?: unknown }).data ?? null;
   }
 
-  return result;
+  // ── 4. Build context-injected system prompt ───────────────────────────────
+  const systemWithContext = buildSystemPrompt(richPools, wallet, positions, overview);
+
+  // ── 5. Single LLM call — no tools, no retry loop ─────────────────────────
+  const response = await client.chat.completions.create({
+    model: MODEL,
+    max_tokens: 4096,
+    messages: [
+      { role: 'system', content: systemWithContext },
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+    ],
+  });
+
+  const text = response.choices[0].message.content ?? '';
+
+  // ── 6. Attach pool cards only when the query is pool-related ──────────────
+  const lastUserMsg = messages.findLast((m) => m.role === 'user')?.content ?? '';
+  const showPools = POOL_QUERY_RE.test(lastUserMsg);
+
+  return {
+    text,
+    toolData: {
+      ...(showPools && { pools: richPools }),
+      ...(positions.length > 0 && { positions }),
+      ...(overview && { overview }),
+    },
+  };
 }
 
-async function processToolCall(
-  name: string,
-  input: Record<string, unknown>,
-  result: AdvisorResult
-): Promise<unknown> {
-  switch (name) {
-    case 'discover_pools': {
-      const res = await lp.discoverPools(input as Parameters<typeof lp.discoverPools>[0]);
-      const pools = (res as { data?: unknown[] }).data ?? [];
-      result.toolData.pools = pools;
-      return res;
+type PoolRaw = Record<string, unknown>;
+
+function slimPool(pool: PoolRaw) {
+  return {
+    id: pool.id ?? pool.address,
+    pairName: pool.pairName ?? pool.name,
+    apr: pool.apr,
+    tvl: pool.tvl,
+    volume24h: pool.volume24h,
+    strategy: pool.strategy,
+    activeBin: pool.activeBin,
+    binStep: pool.binStep,
+  };
+}
+
+function buildSystemPrompt(
+  pools: unknown[],
+  wallet: string | null,
+  positions: unknown[],
+  overview: unknown
+): string {
+  const lines: string[] = [SYSTEM_PROMPT, '', '---', 'Here is the current live data you have access to:', ''];
+
+  const top5 = [...(pools as PoolRaw[])]
+    .sort((a, b) => ((b.apr as number) ?? 0) - ((a.apr as number) ?? 0))
+    .slice(0, 5)
+    .map(slimPool);
+
+  lines.push(`POOLS (top 5 by APR):`);
+  lines.push(JSON.stringify(top5, null, 2));
+
+  if (wallet) {
+    lines.push('', `WALLET: ${wallet}`);
+    if (positions.length > 0) {
+      lines.push('', `OPEN POSITIONS (${positions.length}):`);
+      lines.push(JSON.stringify(positions, null, 2));
+    } else {
+      lines.push('', 'OPEN POSITIONS: None found for this wallet.');
     }
-    case 'get_pool_info': {
-      return lp.getPoolInfo(input.poolId as string);
+    if (overview) {
+      lines.push('', 'PORTFOLIO OVERVIEW:');
+      lines.push(JSON.stringify(overview, null, 2));
     }
-    case 'get_positions': {
-      const res = await lp.getOpenPositions(input.owner as string);
-      const positions = (res as { data?: unknown[] }).data ?? [];
-      result.toolData.positions = positions;
-      return res;
-    }
-    case 'get_portfolio_overview': {
-      const res = await lp.getPortfolioOverview(input.owner as string);
-      result.toolData.overview = (res as { data?: unknown }).data;
-      return res;
-    }
-    default:
-      throw new Error(`Unknown tool: ${name}`);
+  } else {
+    lines.push('', 'POSITIONS: No wallet address detected in this conversation. If the user provides one, positions will appear here.');
   }
+
+  lines.push('', '---');
+  lines.push('Use the activeBin and binStep values above to give exact fromBinId/toBinId in every liquidity recommendation.');
+
+  return lines.join('\n');
 }

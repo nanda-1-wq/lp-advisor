@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import { sendChatMessage } from '../lib/api';
 import type { ChatMessage, Pool } from '../lib/types';
 
@@ -317,8 +318,8 @@ function MessageBubble({
       <div className={`max-w-[80%] ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
         {/* Bubble */}
         <div
-          className={`px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-            isUser ? 'rounded-tr-sm' : 'rounded-tl-sm'
+          className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+            isUser ? 'rounded-tr-sm whitespace-pre-wrap' : 'rounded-tl-sm'
           }`}
           style={
             isUser
@@ -326,7 +327,26 @@ function MessageBubble({
               : { background: '#12131a', border: '1px solid #1e2228', color: '#e5e7eb' }
           }
         >
-          {msg.content}
+          {isUser ? msg.content : (
+            <ReactMarkdown
+              components={{
+                h1: ({ children }) => <h1 className="text-base font-bold text-white mt-3 mb-1 first:mt-0">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-sm font-semibold text-white mt-3 mb-1 first:mt-0">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-sm font-semibold text-emerald-400 mt-2 mb-1 first:mt-0">{children}</h3>,
+                strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+                em: ({ children }) => <em className="text-gray-300 italic">{children}</em>,
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-2 pl-1">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-2 pl-1">{children}</ol>,
+                li: ({ children }) => <li className="text-gray-300">{children}</li>,
+                code: ({ children }) => <code className="px-1 py-0.5 rounded text-xs font-mono" style={{ background: '#0e0f14', color: '#10b981' }}>{children}</code>,
+                blockquote: ({ children }) => <blockquote className="border-l-2 border-emerald-400/50 pl-3 text-gray-400 my-2">{children}</blockquote>,
+                hr: () => <hr className="border-none border-t my-3" style={{ borderColor: '#2a2d38' }} />,
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
+          )}
         </div>
 
         {/* Pool cards */}
@@ -342,6 +362,19 @@ function MessageBubble({
   );
 }
 
+const STORAGE_KEY = 'lp_advisor_chat';
+
+function loadMessages(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return parsed.map((m: ChatMessage) => ({ ...m, timestamp: new Date(m.timestamp) }));
+  } catch {
+    return [];
+  }
+}
+
 const SUGGESTIONS = [
   'SOL/USDC with $200, low risk',
   'Best meme coin pools right now',
@@ -352,87 +385,106 @@ const SUGGESTIONS = [
 export default function Chat() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(loadMessages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedPool, setSelectedPool] = useState<Pool | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Refs that always hold the current state values so sendMessage never
+  // captures stale closures, regardless of when it was created.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
+  // Prevents the URL-query effect from firing twice in React 18 StrictMode.
+  const initialSentRef = useRef(false);
+
+  // Persist messages to localStorage (skip transient loading bubbles)
+  useEffect(() => {
+    const toSave = messages.filter((m) => !m.isLoading);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  }, [messages]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = useCallback(
-    async (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed || loading) return;
+  function clearChat() {
+    localStorage.removeItem(STORAGE_KEY);
+    setMessages([]);
+  }
 
-      const userMsg: ChatMessage = {
-        id: uid(),
-        role: 'user',
-        content: trimmed,
-        timestamp: new Date(),
-      };
-      const loadingMsg: ChatMessage = {
+  const sendMessage = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+    // Read live values from refs — never stale, safe to call from any effect.
+    if (!trimmed || loadingRef.current) return;
+
+    const userMsg: ChatMessage = {
+      id: uid(),
+      role: 'user',
+      content: trimmed,
+      timestamp: new Date(),
+    };
+    const loadingMsg: ChatMessage = {
+      id: uid(),
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isLoading: true,
+    };
+
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setInput('');
+    setLoading(true);
+
+    // Build history from the ref so we always get the current message list.
+    const history = [
+      ...messagesRef.current
+        .filter((m) => !m.isLoading)
+        .map((m) => ({ role: m.role, content: m.content })),
+      { role: 'user' as const, content: trimmed },
+    ];
+
+    try {
+      const res = await sendChatMessage(history);
+      const aiMsg: ChatMessage = {
         id: uid(),
         role: 'assistant',
-        content: '',
+        content: res.message,
         timestamp: new Date(),
-        isLoading: true,
+        toolData: res.toolData,
       };
+      setMessages((prev) => {
+        const without = prev.filter((m) => !m.isLoading);
+        return [...without, aiMsg];
+      });
+    } catch (err) {
+      const errMsg: ChatMessage = {
+        id: uid(),
+        role: 'assistant',
+        content: `Sorry, I ran into an error: ${err instanceof Error ? err.message : 'unknown error'}. Please check that the backend is running on port 3001.`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => {
+        const without = prev.filter((m) => !m.isLoading);
+        return [...without, errMsg];
+      });
+    } finally {
+      setLoading(false);
+      inputRef.current?.focus();
+    }
+  // No deps — reads live state via refs, never needs to be recreated.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-      setMessages((prev) => [...prev, userMsg, loadingMsg]);
-      setInput('');
-      setLoading(true);
-
-      // Build conversation history for API
-      const history = [
-        ...messages
-          .filter((m) => !m.isLoading)
-          .map((m) => ({ role: m.role, content: m.content })),
-        { role: 'user' as const, content: trimmed },
-      ];
-
-      try {
-        const res = await sendChatMessage(history);
-        const aiMsg: ChatMessage = {
-          id: uid(),
-          role: 'assistant',
-          content: res.message,
-          timestamp: new Date(),
-          toolData: res.toolData,
-        };
-        setMessages((prev) => {
-          const without = prev.filter((m) => !m.isLoading);
-          return [...without, aiMsg];
-        });
-      } catch (err) {
-        const errMsg: ChatMessage = {
-          id: uid(),
-          role: 'assistant',
-          content: `Sorry, I ran into an error: ${err instanceof Error ? err.message : 'unknown error'}. Please check that the backend is running on port 3001.`,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => {
-          const without = prev.filter((m) => !m.isLoading);
-          return [...without, errMsg];
-        });
-      } finally {
-        setLoading(false);
-        inputRef.current?.focus();
-      }
-    },
-    [messages, loading]
-  );
-
-  // Handle initial query from URL
+  // Handle initial query from URL — guard with a ref so StrictMode's
+  // double effect invocation doesn't send the message twice.
   useEffect(() => {
     const q = searchParams.get('q');
-    if (q && messages.length === 0) {
+    if (q && !initialSentRef.current) {
+      initialSentRef.current = true;
       sendMessage(q);
-      // Remove from URL without navigation
       navigate('/chat', { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -456,7 +508,18 @@ export default function Chat() {
     <>
       <div className="flex flex-col h-[calc(100svh-3.5rem)]" style={{ maxWidth: '100%' }}>
         {/* Messages area */}
-        <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="flex-1 overflow-y-auto px-4 py-6 relative">
+          {!isEmpty && (
+            <div className="sticky top-0 z-10 flex justify-end max-w-3xl mx-auto mb-2">
+              <button
+                onClick={clearChat}
+                className="text-xs px-3 py-1.5 rounded-lg border transition-colors hover:border-red-400/50 hover:text-red-400"
+                style={{ color: '#6b7280', borderColor: '#2a2d38', background: '#0a0b0e' }}
+              >
+                Clear Chat
+              </button>
+            </div>
+          )}
           <div className="max-w-3xl mx-auto space-y-5">
             {isEmpty && (
               <div className="text-center pt-16 pb-8">
