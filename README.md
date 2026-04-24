@@ -4,33 +4,33 @@
 
 ## What it does
 
-LP Advisor is an AI-powered liquidity provision advisor for Meteora pools on Solana. It uses the LPAgent.io API to help users discover pools, analyze portfolios, and execute Zap-In/Zap-Out transactions — all through a natural language AI chat interface.
+LP Advisor is an AI-powered liquidity provision advisor for Meteora pools on Solana. It uses the LPAgent.io API to help users discover pools, analyze portfolios, and execute Zap-In/Zap-Out transactions - all through a natural language AI chat interface.
 
 ## Features
 
-- AI Advisor Chat — describe your goals in plain English, get pool recommendations with strategy and price ranges
+- AI Advisor Chat - describe your goals in plain English, get pool recommendations with strategy and price ranges
 
-- Portfolio Tracker — paste any Solana wallet to see all open LP positions with P&L, fees, and bin range visualization
+- Portfolio Tracker - paste any Solana wallet to see all open LP positions with P&L, fees, and bin range visualization
 
-- One-Click Zap-Out — withdraw liquidity from any position with customizable output token and percentage
+- One-Click Zap-Out - withdraw liquidity from any position with customizable output token and percentage
 
-- Position History — view all closed positions with returns and win rate
+- Position History - view all closed positions with returns and win rate
 
-- Wallet Connect — Privy integration for MetaMask, Phantom, Trust wallet
+- Wallet Connect - Privy integration for MetaMask, Phantom, Trust wallet
 
 ## LPAgent.io API Usage
 
-- GET /pools/discover — pool discovery
+- GET /pools/discover - pool discovery
 
-- GET /lp-positions/opening — open positions
+- GET /lp-positions/opening - open positions
 
-- GET /lp-positions/overview — portfolio metrics
+- GET /lp-positions/overview - portfolio metrics
 
-- GET /lp-positions/historical — closed positions
+- GET /lp-positions/historical - closed positions
 
-- POST /position/decrease-quotes — Zap-Out quotes
+- POST /position/decrease-quotes - Zap-Out quotes
 
-- POST /position/decrease-tx — Zap-Out transactions
+- POST /position/decrease-tx - Zap-Out transactions
 
 ## Tech Stack
 
