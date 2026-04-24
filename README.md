@@ -1,73 +1,62 @@
-# React + TypeScript + Vite
+# LP Advisor — AI-Powered LP Portfolio Tracker
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> Built on LPAgent.io API · Superteam Frontier Hackathon submission
 
-Currently, two official plugins are available:
+## What it does
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+LP Advisor is an AI-powered liquidity provision advisor for Meteora pools on Solana. It uses the LPAgent.io API to help users discover pools, analyze portfolios, and execute Zap-In/Zap-Out transactions — all through a natural language AI chat interface.
 
-## React Compiler
+## Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- AI Advisor Chat — describe your goals in plain English, get pool recommendations with strategy and price ranges
 
-## Expanding the ESLint configuration
+- Portfolio Tracker — paste any Solana wallet to see all open LP positions with P&L, fees, and bin range visualization
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- One-Click Zap-Out — withdraw liquidity from any position with customizable output token and percentage
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Position History — view all closed positions with returns and win rate
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- Wallet Connect — Privy integration for MetaMask, Phantom, Trust wallet
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## LPAgent.io API Usage
+
+- GET /pools/discover — pool discovery
+
+- GET /lp-positions/opening — open positions
+
+- GET /lp-positions/overview — portfolio metrics
+
+- GET /lp-positions/historical — closed positions
+
+- POST /position/decrease-quotes — Zap-Out quotes
+
+- POST /position/decrease-tx — Zap-Out transactions
+
+## Tech Stack
+
+- React + Vite + TypeScript (frontend)
+
+- Express.js (backend API proxy)
+
+- Groq AI (llama-3.3-70b-versatile) for AI advisor
+
+- Privy for wallet authentication
+
+- LPAgent.io API for all LP data
+
+## Setup
+
+1. Clone the repo
+
+2. Copy `.env.example` to `.env` and fill in keys
+
+3. Run: `pnpm install && pnpm dev`
+
+## Environment Variables
+
 ```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+LPAGENT_API_KEY=your_lpagent_key
+GROQ_API_KEY=your_groq_key
+VITE_PRIVY_APP_ID=your_privy_app_id
+USE_MOCK=false
 ```

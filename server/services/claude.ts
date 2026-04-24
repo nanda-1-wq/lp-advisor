@@ -13,7 +13,7 @@ function getClient(): Groq {
   }
   if (!_groqClient) {
     _groqClient = new Groq({ apiKey: key });
-    console.log(`  [groq] client initialised with key ${key.slice(0, 10)}…`);
+    console.log(`  [groq] client initialised`);
   }
   return _groqClient;
 }
