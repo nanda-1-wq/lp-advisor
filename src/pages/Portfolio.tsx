@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { Component, useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Wallet, AlertTriangle, Copy, RefreshCw, Check,
@@ -7,6 +7,45 @@ import {
 import { usePrivy } from '@privy-io/react-auth';
 import { getOpenPositions, getPortfolioOverview, getHistoricalPositions } from '../lib/api';
 import type { Position, HistoricalPosition, PortfolioOverview } from '../lib/types';
+
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+
+class PortfolioErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(err: Error, info: React.ErrorInfo) {
+    console.error('[PortfolioErrorBoundary]', err, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="max-w-6xl mx-auto px-6 py-16 text-center">
+          <Wallet className="w-10 h-10 mx-auto mb-4" style={{ color: '#555555' }} />
+          <p className="text-white font-bold mb-1">Something went wrong</p>
+          <p className="text-sm" style={{ color: '#888888' }}>
+            No positions found for this wallet, or the data could not be displayed.
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false })}
+            className="mt-4 px-4 py-2 rounded-xl text-sm font-bold border transition-colors"
+            style={{ borderColor: '#333333', color: '#aaaaaa', background: 'transparent' }}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -21,8 +60,14 @@ function getConnectedWallet(user: ReturnType<typeof usePrivy>['user']): string |
   return user.wallet?.address ?? null;
 }
 
-function fmt(n: number) {
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmt(n: unknown): string {
+  const num = typeof n === 'number' && isFinite(n) ? n : 0;
+  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function safeFixed(n: unknown, digits = 1): string {
+  const num = typeof n === 'number' && isFinite(n) ? n : 0;
+  return num.toFixed(digits);
 }
 
 function relativeTime(date: Date): string {
@@ -32,6 +77,27 @@ function relativeTime(date: Date): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
   return `${Math.floor(m / 60)}h ago`;
+}
+
+function safeDate(val: unknown, opts: Intl.DateTimeFormatOptions): string {
+  try {
+    const d = new Date(val as string);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-US', opts);
+  } catch {
+    return '—';
+  }
+}
+
+function safeSymbol(token: unknown): string {
+  if (!token || typeof token !== 'object') return '?';
+  const t = token as Record<string, unknown>;
+  const s = typeof t.symbol === 'string' ? t.symbol : '';
+  return s[0] ?? '?';
+}
+
+function safeSlice(s: unknown, len = 8): string {
+  return typeof s === 'string' ? s.slice(0, len) : '—';
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -78,23 +144,28 @@ function StrategyBadge({ s }: { s: string }) {
       className="text-xs px-2 py-0.5 rounded-full"
       style={{ background: `${c}20`, color: c, border: `1px solid ${c}40` }}
     >
-      {s}
+      {s || '—'}
     </span>
   );
 }
 
 function PositionCard({ pos, onView }: { pos: Position; onView: (p: Position) => void }) {
-  const pnlPos = pos.pnlPercent >= 0;
-  const openDate = new Date(pos.openedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const rangeWidth = pos.upperBin - pos.lowerBin;
-  const progress = Math.max(0, Math.min(1, (pos.activeBin - pos.lowerBin) / rangeWidth));
+  const pnlPercent = typeof pos.pnlPercent === 'number' ? pos.pnlPercent : 0;
+  const pnlPos = pnlPercent >= 0;
+  const openDate = safeDate(pos.openedAt, { month: 'short', day: 'numeric' });
+  const lowerBin = pos.lowerBin ?? 0;
+  const upperBin = pos.upperBin ?? 0;
+  const activeBin = pos.activeBin ?? 0;
+  const rangeWidth = upperBin - lowerBin || 1; // avoid div-by-zero
+  const progress = Math.max(0, Math.min(1, (activeBin - lowerBin) / rangeWidth));
+  const isInRange = !!pos.isInRange;
 
   return (
     <div
       className="rounded-xl border p-5 transition-colors cursor-pointer"
-      style={{ background: '#111111', borderColor: pos.isInRange ? '#1e1e1e' : '#ff444430' }}
-      onMouseEnter={(e) => (e.currentTarget.style.borderColor = pos.isInRange ? '#00ff8530' : '#ff444460')}
-      onMouseLeave={(e) => (e.currentTarget.style.borderColor = pos.isInRange ? '#1e1e1e' : '#ff444430')}
+      style={{ background: '#111111', borderColor: isInRange ? '#1e1e1e' : '#ff444430' }}
+      onMouseEnter={(e) => (e.currentTarget.style.borderColor = isInRange ? '#00ff8530' : '#ff444460')}
+      onMouseLeave={(e) => (e.currentTarget.style.borderColor = isInRange ? '#1e1e1e' : '#ff444430')}
       onClick={() => onView(pos)}
     >
       <div className="flex items-center justify-between mb-4">
@@ -103,21 +174,21 @@ function PositionCard({ pos, onView }: { pos: Position; onView: (p: Position) =>
             className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold"
             style={{ background: '#00ff8520', color: '#00ff85', border: '1px solid #00ff8540' }}
           >
-            {pos.tokenX.symbol[0]}
+            {safeSymbol(pos.tokenX)}
           </div>
           <div>
-            <div className="text-white font-bold">{pos.poolName}</div>
+            <div className="text-white font-bold">{pos.poolName || '—'}</div>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <StrategyBadge s={pos.strategy} />
+              <StrategyBadge s={pos.strategy || ''} />
               <span style={{ color: '#333333' }} className="text-xs">·</span>
               <span className="text-xs" style={{ color: '#888888' }}>opened {openDate}</span>
             </div>
           </div>
         </div>
-        <RangeBadge isInRange={pos.isInRange} />
+        <RangeBadge isInRange={isInRange} />
       </div>
 
-      {!pos.isInRange && (
+      {!isInRange && (
         <div
           className="text-xs px-3 py-2 rounded-lg mb-3 flex items-center gap-2"
           style={{ background: '#ff444415', color: '#ff4444', border: '1px solid #ff444430' }}
@@ -135,36 +206,36 @@ function PositionCard({ pos, onView }: { pos: Position; onView: (p: Position) =>
         <div>
           <div className="text-xs mb-0.5" style={{ color: '#888888' }}>P&amp;L</div>
           <div className="font-bold" style={{ color: pnlPos ? '#00ff85' : '#ff4444' }}>
-            {pnlPos ? '+' : ''}{pos.pnlPercent.toFixed(1)}%
+            {pnlPos ? '+' : ''}{safeFixed(pos.pnlPercent)}%
             <span className="text-xs ml-1 opacity-75">
-              ({pnlPos ? '+' : ''}${pos.pnlUSD.toFixed(2)})
+              ({pnlPos ? '+' : ''}${safeFixed(pos.pnlUSD, 2)})
             </span>
           </div>
         </div>
         <div>
           <div className="text-xs mb-0.5" style={{ color: '#888888' }}>Fees Earned</div>
-          <div className="font-bold" style={{ color: '#00ff85' }}>+${pos.feesEarned.toFixed(2)}</div>
+          <div className="font-bold" style={{ color: '#00ff85' }}>+${safeFixed(pos.feesEarned, 2)}</div>
         </div>
       </div>
 
       <div className="mb-3">
         <div className="flex justify-between text-xs mb-1" style={{ color: '#555555' }}>
-          <span>Bin {pos.lowerBin}</span>
-          <span style={{ color: '#888888' }}>Active: {pos.activeBin}</span>
-          <span>Bin {pos.upperBin}</span>
+          <span>Bin {lowerBin}</span>
+          <span style={{ color: '#888888' }}>Active: {activeBin}</span>
+          <span>Bin {upperBin}</span>
         </div>
         <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#1e1e1e' }}>
           <div
             className="h-full rounded-full"
             style={{
               width: '100%',
-              background: pos.isInRange
+              background: isInRange
                 ? 'linear-gradient(90deg, #00ff8540, #00ff85, #00ff8540)'
                 : '#ff444440',
             }}
           />
         </div>
-        {pos.isInRange && (
+        {isInRange && (
           <div
             className="w-2 h-2 rounded-full mt-1 -translate-y-3.5"
             style={{
@@ -178,7 +249,14 @@ function PositionCard({ pos, onView }: { pos: Position; onView: (p: Position) =>
 
       <div className="flex items-center justify-between">
         <div className="text-xs" style={{ color: '#555555' }}>
-          {pos.tokenX.amount.toLocaleString()} {pos.tokenX.symbol} · {pos.tokenY.amount.toLocaleString()} {pos.tokenY.symbol}
+          {(pos.tokenX as Record<string, unknown>)?.amount != null
+            ? Number((pos.tokenX as Record<string, unknown>).amount).toLocaleString()
+            : '0'}{' '}
+          {(pos.tokenX as Record<string, unknown>)?.symbol as string ?? ''} ·{' '}
+          {(pos.tokenY as Record<string, unknown>)?.amount != null
+            ? Number((pos.tokenY as Record<string, unknown>).amount).toLocaleString()
+            : '0'}{' '}
+          {(pos.tokenY as Record<string, unknown>)?.symbol as string ?? ''}
         </div>
         <span className="text-xs font-medium" style={{ color: '#00ff85' }}>View →</span>
       </div>
@@ -198,11 +276,12 @@ function OpenPositionsTable({ positions, onView }: { positions: Position[]; onVi
           </tr>
         </thead>
         <tbody>
-          {positions.map((pos) => {
-            const pnlPos = pos.pnlPercent >= 0;
+          {positions.map((pos, i) => {
+            const pnlPercent = typeof pos.pnlPercent === 'number' ? pos.pnlPercent : 0;
+            const pnlPos = pnlPercent >= 0;
             return (
               <tr
-                key={pos.positionAddress}
+                key={pos.positionAddress || i}
                 className="border-t transition-colors cursor-pointer"
                 style={{ borderColor: '#1e1e1e' }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = '#ffffff05')}
@@ -215,28 +294,28 @@ function OpenPositionsTable({ positions, onView }: { positions: Position[]; onVi
                       className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
                       style={{ background: '#00ff8520', color: '#00ff85', border: '1px solid #00ff8540' }}
                     >
-                      {pos.tokenX.symbol[0]}
+                      {safeSymbol(pos.tokenX)}
                     </div>
                     <div>
-                      <div className="text-white text-sm font-medium">{pos.poolName}</div>
+                      <div className="text-white text-sm font-medium">{pos.poolName || '—'}</div>
                       <div className="text-xs font-mono" style={{ color: '#555555' }}>
-                        {pos.positionAddress.slice(0, 8)}…
+                        {safeSlice(pos.positionAddress)}…
                       </div>
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3"><StrategyBadge s={pos.strategy} /></td>
+                <td className="px-4 py-3"><StrategyBadge s={pos.strategy || ''} /></td>
                 <td className="px-4 py-3 text-white text-sm font-medium">${fmt(pos.totalValueUSD)}</td>
-                <td className="px-4 py-3 text-sm font-medium" style={{ color: '#00ff85' }}>+${pos.feesEarned.toFixed(2)}</td>
+                <td className="px-4 py-3 text-sm font-medium" style={{ color: '#00ff85' }}>+${safeFixed(pos.feesEarned, 2)}</td>
                 <td className="px-4 py-3">
                   <div className="font-bold text-sm" style={{ color: pnlPos ? '#00ff85' : '#ff4444' }}>
-                    {pnlPos ? '+' : ''}{pos.pnlPercent.toFixed(1)}%
+                    {pnlPos ? '+' : ''}{safeFixed(pos.pnlPercent)}%
                   </div>
                   <div className="text-xs" style={{ color: pnlPos ? '#00ff8570' : '#ff444470' }}>
-                    {pnlPos ? '+' : ''}${pos.pnlUSD.toFixed(2)}
+                    {pnlPos ? '+' : ''}${safeFixed(pos.pnlUSD, 2)}
                   </div>
                 </td>
-                <td className="px-4 py-3"><RangeBadge isInRange={pos.isInRange} /></td>
+                <td className="px-4 py-3"><RangeBadge isInRange={!!pos.isInRange} /></td>
                 <td className="px-4 py-3 text-right">
                   <span className="text-xs font-medium" style={{ color: '#00ff85' }}>View →</span>
                 </td>
@@ -263,14 +342,13 @@ function HistoricalTable({ positions }: { positions: HistoricalPosition[] }) {
             </tr>
           </thead>
           <tbody>
-            {positions.map((pos) => {
-              const pos_ = pos.totalReturnPercent >= 0;
-              const closedDate = new Date(pos.closedAt).toLocaleDateString('en-US', {
-                month: 'short', day: 'numeric', year: 'numeric',
-              });
+            {positions.map((pos, i) => {
+              const retPct = typeof pos.totalReturnPercent === 'number' ? pos.totalReturnPercent : 0;
+              const pos_ = retPct >= 0;
+              const closedDate = safeDate(pos.closedAt, { month: 'short', day: 'numeric', year: 'numeric' });
               return (
                 <tr
-                  key={pos.positionAddress}
+                  key={pos.positionAddress || i}
                   className="border-t transition-colors"
                   style={{ borderColor: '#1e1e1e' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = '#ffffff05')}
@@ -282,23 +360,23 @@ function HistoricalTable({ positions }: { positions: HistoricalPosition[] }) {
                         className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
                         style={{ background: '#ffffff10', color: '#888888', border: '1px solid #ffffff20' }}
                       >
-                        {pos.tokenX.symbol[0]}
+                        {safeSymbol(pos.tokenX)}
                       </div>
                       <div>
-                        <div className="text-white text-sm font-medium">{pos.poolName}</div>
+                        <div className="text-white text-sm font-medium">{pos.poolName || '—'}</div>
                         <div className="text-xs font-mono" style={{ color: '#555555' }}>
-                          {pos.positionAddress.slice(0, 8)}…
+                          {safeSlice(pos.positionAddress)}…
                         </div>
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3"><StrategyBadge s={pos.strategy} /></td>
-                  <td className="px-4 py-3 text-white text-sm">{pos.durationDays}d</td>
+                  <td className="px-4 py-3"><StrategyBadge s={pos.strategy || ''} /></td>
+                  <td className="px-4 py-3 text-white text-sm">{pos.durationDays ?? '—'}d</td>
                   <td className="px-4 py-3 text-white text-sm">${fmt(pos.totalValueUSD)}</td>
                   <td className="px-4 py-3 text-sm font-medium" style={{ color: '#00ff85' }}>+${fmt(pos.feesEarned)}</td>
                   <td className="px-4 py-3">
                     <div className="font-bold text-sm" style={{ color: pos_ ? '#00ff85' : '#ff4444' }}>
-                      {pos_ ? '+' : ''}{pos.totalReturnPercent.toFixed(1)}%
+                      {pos_ ? '+' : ''}{safeFixed(pos.totalReturnPercent)}%
                     </div>
                     <div className="text-xs" style={{ color: pos_ ? '#00ff8570' : '#ff444470' }}>
                       {pos_ ? '+' : ''}${fmt(pos.totalReturnUSD)}
@@ -314,14 +392,13 @@ function HistoricalTable({ positions }: { positions: HistoricalPosition[] }) {
 
       {/* Mobile */}
       <div className="md:hidden space-y-3">
-        {positions.map((pos) => {
-          const pos_ = pos.totalReturnPercent >= 0;
-          const closedDate = new Date(pos.closedAt).toLocaleDateString('en-US', {
-            month: 'short', day: 'numeric', year: '2-digit',
-          });
+        {positions.map((pos, i) => {
+          const retPct = typeof pos.totalReturnPercent === 'number' ? pos.totalReturnPercent : 0;
+          const pos_ = retPct >= 0;
+          const closedDate = safeDate(pos.closedAt, { month: 'short', day: 'numeric', year: '2-digit' });
           return (
             <div
-              key={pos.positionAddress}
+              key={pos.positionAddress || i}
               className="rounded-xl border p-4"
               style={{ background: '#111111', borderColor: '#1e1e1e' }}
             >
@@ -331,14 +408,14 @@ function HistoricalTable({ positions }: { positions: HistoricalPosition[] }) {
                     className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
                     style={{ background: '#ffffff10', color: '#888888', border: '1px solid #ffffff20' }}
                   >
-                    {pos.tokenX.symbol[0]}
+                    {safeSymbol(pos.tokenX)}
                   </div>
                   <div>
-                    <div className="text-white text-sm font-bold">{pos.poolName}</div>
-                    <div className="text-xs" style={{ color: '#555555' }}>{closedDate} · {pos.durationDays}d</div>
+                    <div className="text-white text-sm font-bold">{pos.poolName || '—'}</div>
+                    <div className="text-xs" style={{ color: '#555555' }}>{closedDate} · {pos.durationDays ?? '?'}d</div>
                   </div>
                 </div>
-                <StrategyBadge s={pos.strategy} />
+                <StrategyBadge s={pos.strategy || ''} />
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
@@ -352,7 +429,7 @@ function HistoricalTable({ positions }: { positions: HistoricalPosition[] }) {
                 <div>
                   <div className="text-xs mb-0.5" style={{ color: '#888888' }}>P&amp;L</div>
                   <div className="font-bold text-sm" style={{ color: pos_ ? '#00ff85' : '#ff4444' }}>
-                    {pos_ ? '+' : ''}{pos.totalReturnPercent.toFixed(1)}%
+                    {pos_ ? '+' : ''}{safeFixed(pos.totalReturnPercent)}%
                   </div>
                 </div>
               </div>
@@ -366,7 +443,7 @@ function HistoricalTable({ positions }: { positions: HistoricalPosition[] }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function Portfolio() {
+function PortfolioInner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { authenticated, user } = usePrivy();
@@ -397,29 +474,68 @@ export default function Portfolio() {
     if (!w.trim()) return;
     setLoading(true);
     setError('');
+
     try {
-      const [posRes, ovRes, histRes] = await Promise.all([
+      // Fire all three independently — a rejected promise won't kill the others
+      const [posSettled, ovSettled, histSettled] = await Promise.allSettled([
         getOpenPositions(w),
         getPortfolioOverview(w),
         getHistoricalPositions(w),
       ]);
-      console.log('[portfolio] open:', posRes);
-      console.log('[portfolio] overview:', ovRes);
-      console.log('[portfolio] history:', histRes);
 
-      // Always coerce to array — real API shape may differ from mock
-      if (posRes.success) {
-        const d = posRes.data;
-        setPositions(Array.isArray(d) ? d : []);
+      console.log('[portfolio] settled:', posSettled, ovSettled, histSettled);
+
+      // Positions
+      try {
+        if (posSettled.status === 'fulfilled') {
+          const res = posSettled.value;
+          const d = res.success ? res.data : undefined;
+          setPositions(Array.isArray(d) ? d : []);
+        } else {
+          console.warn('[portfolio] positions fetch rejected:', posSettled.reason);
+          setPositions([]);
+        }
+      } catch (e) {
+        console.warn('[portfolio] positions parse error:', e);
+        setPositions([]);
       }
-      if (ovRes.success) setOverview(ovRes.data ?? null);
-      if (histRes.success) {
-        const d = histRes.data;
-        setHistoricalPositions(Array.isArray(d) ? d : []);
+
+      // Overview
+      try {
+        if (ovSettled.status === 'fulfilled') {
+          const res = ovSettled.value;
+          setOverview(res.success ? (res.data ?? null) : null);
+        } else {
+          console.warn('[portfolio] overview fetch rejected:', ovSettled.reason);
+          setOverview(null);
+        }
+      } catch (e) {
+        console.warn('[portfolio] overview parse error:', e);
+        setOverview(null);
       }
+
+      // History
+      try {
+        if (histSettled.status === 'fulfilled') {
+          const res = histSettled.value;
+          const d = res.success ? res.data : undefined;
+          setHistoricalPositions(Array.isArray(d) ? d : []);
+        } else {
+          console.warn('[portfolio] history fetch rejected:', histSettled.reason);
+          setHistoricalPositions([]);
+        }
+      } catch (e) {
+        console.warn('[portfolio] history parse error:', e);
+        setHistoricalPositions([]);
+      }
+
       setLastUpdated(new Date());
     } catch (e) {
-      console.error('[portfolio] loadAll error:', e);
+      // Outer safety net — should not normally be reached
+      console.error('[portfolio] loadAll outer error:', e);
+      setPositions([]);
+      setOverview(null);
+      setHistoricalPositions([]);
       setError(e instanceof Error ? e.message : 'Failed to load portfolio');
     } finally {
       setLoading(false);
@@ -444,19 +560,19 @@ export default function Portfolio() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  // Derived stats
-  const openFees = positions.reduce((s, p) => s + p.feesEarned, 0);
-  const histFees = historicalPositions.reduce((s, p) => s + p.feesEarned, 0);
-  const allTimeFees = openFees + histFees;
-  const histWinners = historicalPositions.filter((p) => p.totalReturnPercent >= 0).length;
-  const winRate = historicalPositions.length > 0
-    ? (histWinners / historicalPositions.length) * 100
-    : null;
-  const totalOpenValue = positions.reduce((s, p) => s + p.totalValueUSD, 0);
-  const totalOpenPnl = positions.reduce((s, p) => s + p.pnlUSD, 0);
-  const outOfRange = positions.filter((p) => !p.isInRange);
+  // Derived stats — always safe even if arrays are empty
+  const safePos = Array.isArray(positions) ? positions : [];
+  const safeHist = Array.isArray(historicalPositions) ? historicalPositions : [];
 
-  // Show content once a fetch has completed — even if overview is null (empty wallet)
+  const openFees = safePos.reduce((s, p) => s + (typeof p.feesEarned === 'number' ? p.feesEarned : 0), 0);
+  const histFees = safeHist.reduce((s, p) => s + (typeof p.feesEarned === 'number' ? p.feesEarned : 0), 0);
+  const allTimeFees = openFees + histFees;
+  const histWinners = safeHist.filter((p) => (typeof p.totalReturnPercent === 'number' ? p.totalReturnPercent : 0) >= 0).length;
+  const winRate = safeHist.length > 0 ? (histWinners / safeHist.length) * 100 : null;
+  const totalOpenValue = safePos.reduce((s, p) => s + (typeof p.totalValueUSD === 'number' ? p.totalValueUSD : 0), 0);
+  const totalOpenPnl = safePos.reduce((s, p) => s + (typeof p.pnlUSD === 'number' ? p.pnlUSD : 0), 0);
+  const outOfRange = safePos.filter((p) => !p.isInRange);
+
   const loaded = !loading && hasFetched;
 
   return (
@@ -543,7 +659,7 @@ export default function Portfolio() {
       )}
 
       {/* ── Error ─────────────────────────────────────────────────────────────── */}
-      {error && (
+      {!loading && error && (
         <div
           className="rounded-xl border p-4 text-sm flex items-center gap-2 mb-6"
           style={{ borderColor: '#ff444430', background: '#ff444415', color: '#ff4444' }}
@@ -553,15 +669,14 @@ export default function Portfolio() {
         </div>
       )}
 
-      {/* ── Empty state ───────────────────────────────────────────────────────── */}
-      {!loading && !hasFetched && !error && !wallet && (
+      {/* ── Empty state (no wallet entered yet) ───────────────────────────────── */}
+      {!loading && !hasFetched && !wallet && (
         <div
           className="rounded-xl border flex flex-col items-center justify-center min-h-[400px] text-center"
           style={{ background: '#111111', borderColor: '#1e1e1e' }}
         >
           <Wallet className="w-8 h-8 mx-auto mb-4" style={{ color: '#888888' }} />
           <p style={{ color: '#888888' }}>Enter a wallet address above to view your LP positions.</p>
-          <p className="text-sm mt-1" style={{ color: '#444444' }}>Demo mode — any address works.</p>
         </div>
       )}
 
@@ -573,14 +688,14 @@ export default function Portfolio() {
             <StatCard
               label="Total Net Worth"
               value={`$${fmt(totalOpenValue)}`}
-              sub={`${positions.length} open position${positions.length !== 1 ? 's' : ''}`}
+              sub={`${safePos.length} open position${safePos.length !== 1 ? 's' : ''}`}
             />
             <StatCard
               label="Win Rate"
               value={winRate !== null ? `${winRate.toFixed(0)}%` : '—'}
               sub={
-                historicalPositions.length > 0
-                  ? `${histWinners}/${historicalPositions.length} closed positions`
+                safeHist.length > 0
+                  ? `${histWinners}/${safeHist.length} closed positions`
                   : 'No closed positions yet'
               }
               accent={winRate !== null && winRate >= 50}
@@ -595,8 +710,8 @@ export default function Portfolio() {
               label="Total P&L"
               value={`${totalOpenPnl >= 0 ? '+' : ''}$${fmt(totalOpenPnl)}`}
               sub={
-                overview
-                  ? `${overview.totalPnlPercent >= 0 ? '+' : ''}${overview.totalPnlPercent.toFixed(1)}% unrealized`
+                overview && typeof overview.totalPnlPercent === 'number'
+                  ? `${overview.totalPnlPercent >= 0 ? '+' : ''}${safeFixed(overview.totalPnlPercent)}% unrealized`
                   : undefined
               }
               accent={totalOpenPnl >= 0}
@@ -616,7 +731,7 @@ export default function Portfolio() {
                   {outOfRange.length} position{outOfRange.length > 1 ? 's' : ''} out of range
                 </p>
                 <p className="text-xs mt-0.5" style={{ color: '#888888' }}>
-                  {outOfRange.map((p) => p.poolName).join(', ')} — collecting zero fees. Consider rebalancing.
+                  {outOfRange.map((p) => p.poolName || '—').join(', ')} — collecting zero fees. Consider rebalancing.
                 </p>
               </div>
             </div>
@@ -624,12 +739,11 @@ export default function Portfolio() {
 
           {/* ── Open Positions ──────────────────────────────────────────────────── */}
           <div className="mb-8">
-            {/* Section header */}
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-bold text-white">
                 Open Positions
                 <span className="text-sm font-normal ml-2" style={{ color: '#888888' }}>
-                  ({positions.length})
+                  ({safePos.length})
                 </span>
               </h2>
               <div className="flex items-center gap-1">
@@ -661,7 +775,7 @@ export default function Portfolio() {
             </div>
 
             {/* Summary bar */}
-            {positions.length > 0 && (
+            {safePos.length > 0 && (
               <div
                 className="flex items-center gap-6 px-4 py-2.5 rounded-xl border mb-4 flex-wrap"
                 style={{ background: '#0a0a0a', borderColor: '#1e1e1e' }}
@@ -679,8 +793,8 @@ export default function Portfolio() {
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs" style={{ color: '#555555' }}>In range</span>
                   <span className="text-sm font-bold text-white">
-                    {overview?.inRangeCount ?? positions.filter(p => p.isInRange).length}/
-                    {overview?.positionCount ?? positions.length}
+                    {overview?.inRangeCount ?? safePos.filter(p => p.isInRange).length}/
+                    {overview?.positionCount ?? safePos.length}
                   </span>
                   {(overview?.outOfRangeCount ?? outOfRange.length) > 0 && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: '#ff444420', color: '#ff4444' }}>
@@ -691,8 +805,7 @@ export default function Portfolio() {
               </div>
             )}
 
-            {/* Cards or Table */}
-            {positions.length === 0 ? (
+            {safePos.length === 0 ? (
               <div
                 className="rounded-xl border p-12 flex flex-col items-center justify-center min-h-[200px]"
                 style={{ background: '#111111', borderColor: '#1e1e1e' }}
@@ -702,9 +815,9 @@ export default function Portfolio() {
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {positions.map((pos) => (
+                {safePos.map((pos, i) => (
                   <PositionCard
-                    key={pos.positionAddress}
+                    key={pos.positionAddress || i}
                     pos={pos}
                     onView={(p) => navigate(`/portfolio/${p.positionAddress}`, { state: { position: p } })}
                   />
@@ -712,24 +825,24 @@ export default function Portfolio() {
               </div>
             ) : (
               <OpenPositionsTable
-                positions={positions}
+                positions={safePos}
                 onView={(p) => navigate(`/portfolio/${p.positionAddress}`, { state: { position: p } })}
               />
             )}
           </div>
 
           {/* ── Historical Positions ────────────────────────────────────────────── */}
-          <div>
+          <div className="pb-8">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-bold text-white">
                 Historical Positions
                 <span className="text-sm font-normal ml-2" style={{ color: '#888888' }}>
-                  ({historicalPositions.length})
+                  ({safeHist.length})
                 </span>
               </h2>
             </div>
 
-            {historicalPositions.length === 0 ? (
+            {safeHist.length === 0 ? (
               <div
                 className="rounded-xl border p-10 flex flex-col items-center justify-center text-center"
                 style={{ background: '#111111', borderColor: '#1e1e1e' }}
@@ -737,11 +850,19 @@ export default function Portfolio() {
                 <p style={{ color: '#888888' }}>No closed positions found for this wallet.</p>
               </div>
             ) : (
-              <HistoricalTable positions={historicalPositions} />
+              <HistoricalTable positions={safeHist} />
             )}
           </div>
         </>
       )}
     </div>
+  );
+}
+
+export default function Portfolio() {
+  return (
+    <PortfolioErrorBoundary>
+      <PortfolioInner />
+    </PortfolioErrorBoundary>
   );
 }

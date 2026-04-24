@@ -23,7 +23,7 @@ const FEATURES = [
   {
     Icon: Wallet,
     title: 'Portfolio Analysis',
-    desc: 'Paste your wallet — AI gives you a plain-English health report on every open position.',
+    desc: 'Paste your wallet address and AI gives you a plain-English health report on every open position.',
   },
   {
     Icon: Zap,
