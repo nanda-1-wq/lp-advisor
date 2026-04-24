@@ -31,8 +31,9 @@ app.get('/health', (_req, res) => {
 
 app.listen(PORT, () => {
   const groqKey = process.env.GROQ_API_KEY ?? '';
+  const isMock = process.env.USE_MOCK !== 'false';
   console.log(`\n  LP Advisor backend → http://localhost:${PORT}`);
-  console.log(`  Mock mode: ${process.env.USE_MOCK !== 'false'}`);
+  console.log(`  Data mode:     ${isMock ? '🟡 MOCK (USE_MOCK != false)' : '🟢 REAL LPAgent API'}`);
   console.log(`  Groq key:      ${groqKey ? `✓ set (${groqKey.slice(0, 10)}…)` : '✗ MISSING — chat will fail'}`);
-  console.log(`  LP Agent key:  ${process.env.LPAGENT_API_KEY ? '✓ set' : '✗ missing (mock ok)'}\n`);
+  console.log(`  LP Agent key:  ${process.env.LPAGENT_API_KEY ? '✓ set' : '✗ missing — real API calls will fail'}\n`);
 });

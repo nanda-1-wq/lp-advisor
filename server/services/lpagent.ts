@@ -5,7 +5,10 @@
 
 import * as mock from './mock.js';
 
-const USE_MOCK = process.env.USE_MOCK !== 'false';
+// Lazy getter — reads process.env at call time, NOT at module-load time.
+// In ESM, module-level code runs before the entry-point body (incl. dotenv.config()),
+// so a module-level const would always capture undefined → true (mock mode).
+const useMock = () => process.env.USE_MOCK !== 'false';
 const BASE_URL = 'https://api.lpagent.io/open-api/v1';
 
 async function lpRequest<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -34,7 +37,7 @@ export async function discoverPools(params: {
   min_tvl?: number;
   min_liquidity?: number;
 }) {
-  if (USE_MOCK) {
+  if (useMock()) {
     let pools = [...mock.MOCK_POOLS];
     if (params.tokenPair) {
       const pair = params.tokenPair.toUpperCase();
@@ -64,7 +67,7 @@ export async function discoverPools(params: {
 }
 
 export async function getPoolInfo(poolId: string) {
-  if (USE_MOCK) {
+  if (useMock()) {
     const info =
       mock.MOCK_POOL_INFO[poolId] ??
       // Fallback for unknown poolIds in demo mode
@@ -84,7 +87,7 @@ export async function getPoolInfo(poolId: string) {
 }
 
 export async function getPoolStats(poolId: string) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return {
       data: {
         poolAddress: poolId,
@@ -100,29 +103,40 @@ export async function getPoolStats(poolId: string) {
 // ─── Positions ────────────────────────────────────────────────────────────────
 
 export async function getOpenPositions(owner: string) {
-  if (USE_MOCK) {
-    // Return mock positions regardless of wallet (demo mode)
+  if (useMock()) {
     return { data: mock.MOCK_POSITIONS };
   }
-  return lpRequest<{ data: unknown[] }>(`/lp-positions/opening?owner=${owner}`);
+  const url = `/lp-positions/opening?owner=${owner}`;
+  console.log(`[lpagent] GET ${BASE_URL}${url}`);
+  const result = await lpRequest<unknown>(url);
+  console.log(`[lpagent] opening response:`, JSON.stringify(result).slice(0, 300));
+  return result;
 }
 
 export async function getPortfolioOverview(owner: string) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return { data: mock.MOCK_OVERVIEW };
   }
-  return lpRequest<{ data: unknown }>(`/lp-positions/overview?owner=${owner}`);
+  const url = `/lp-positions/overview?owner=${owner}`;
+  console.log(`[lpagent] GET ${BASE_URL}${url}`);
+  const result = await lpRequest<unknown>(url);
+  console.log(`[lpagent] overview response:`, JSON.stringify(result).slice(0, 300));
+  return result;
 }
 
 export async function getHistoricalPositions(owner: string) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return { data: mock.MOCK_HISTORY };
   }
-  return lpRequest<{ data: unknown[] }>(`/lp-positions/historical?owner=${owner}`);
+  const url = `/lp-positions/historical?owner=${owner}`;
+  console.log(`[lpagent] GET ${BASE_URL}${url}`);
+  const result = await lpRequest<unknown>(url);
+  console.log(`[lpagent] historical response:`, JSON.stringify(result).slice(0, 300));
+  return result;
 }
 
 export async function getRevenue(owner: string) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return {
       data: {
         fees7d: 22.4,
@@ -136,7 +150,7 @@ export async function getRevenue(owner: string) {
 }
 
 export async function getWalletBalances(owner: string) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return {
       data: [
         { symbol: 'SOL', amount: 4.2, valueUSD: 733.5 },
@@ -160,7 +174,7 @@ export async function generateZapInTx(body: {
   slippage_bps?: number;
   mode?: string;
 }) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return {
       data: {
         ...mock.MOCK_ZAP_IN_TX,
@@ -182,7 +196,7 @@ export async function generateZapInTxForPool(
   poolId: string,
   body: Parameters<typeof generateZapInTx>[0]
 ) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return {
       data: {
         ...mock.MOCK_ZAP_IN_TX,
@@ -209,7 +223,7 @@ export async function submitZapIn(body: {
   addLiquidityTxsWithJito: string[];
   meta: Record<string, unknown>;
 }) {
-  if (USE_MOCK) {
+  if (useMock()) {
     await new Promise((r) => setTimeout(r, 1500)); // Simulate Jito submission
     return {
       data: {
@@ -230,7 +244,7 @@ export async function getZapOutQuotes(body: {
   bps: number;
   outputType: string;
 }) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return { data: mock.MOCK_ZAP_OUT_QUOTE };
   }
   return lpRequest<{ data: unknown }>('/position/decrease-quotes', {
@@ -245,7 +259,7 @@ export async function generateZapOutTx(body: {
   bps: number;
   outputType: string;
 }) {
-  if (USE_MOCK) {
+  if (useMock()) {
     return {
       data: {
         ...mock.MOCK_ZAP_OUT_TX,
@@ -264,7 +278,7 @@ export async function submitZapOut(body: {
   txsWithJito: string[];
   meta: Record<string, unknown>;
 }) {
-  if (USE_MOCK) {
+  if (useMock()) {
     await new Promise((r) => setTimeout(r, 1500));
     return {
       data: {

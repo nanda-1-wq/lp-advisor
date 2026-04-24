@@ -1,7 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { History as HistoryIcon } from 'lucide-react';
+import { usePrivy } from '@privy-io/react-auth';
 import { getHistoricalPositions } from '../lib/api';
 import type { HistoricalPosition } from '../lib/types';
+
+function getConnectedWallet(user: ReturnType<typeof usePrivy>['user']): string | null {
+  if (!user) return null;
+  const solana = user.linkedAccounts?.find(
+    (a) => a.type === 'wallet' && (a as { chainType?: string }).chainType === 'solana'
+  ) as { address?: string } | undefined;
+  if (solana?.address) return solana.address;
+  const any = user.linkedAccounts?.find((a) => a.type === 'wallet') as { address?: string } | undefined;
+  if (any?.address) return any.address;
+  return user.wallet?.address ?? null;
+}
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -24,10 +37,10 @@ function ReturnCell({ pct, usd }: { pct: number; usd: number }) {
   const pos = pct >= 0;
   return (
     <div>
-      <div className={`font-medium text-sm ${pos ? 'text-emerald-400' : 'text-red-400'}`}>
+      <div className="font-bold text-sm" style={{ color: pos ? '#00ff85' : '#ff4444' }}>
         {pos ? '+' : ''}{pct.toFixed(1)}%
       </div>
-      <div className={`text-xs ${pos ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
+      <div className="text-xs" style={{ color: pos ? '#00ff8570' : '#ff444470' }}>
         {pos ? '+' : ''}${fmt(usd)}
       </div>
     </div>
@@ -37,6 +50,8 @@ function ReturnCell({ pct, usd }: { pct: number; usd: number }) {
 export default function History() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { authenticated, user } = usePrivy();
+  const connectedWallet = getConnectedWallet(user);
 
   const [wallet, setWallet] = useState(searchParams.get('wallet') ?? '');
   const [inputWallet, setInputWallet] = useState(wallet);
@@ -45,6 +60,15 @@ export default function History() {
   const [error, setError] = useState('');
   const [sortBy, setSortBy] = useState<'closedAt' | 'totalReturnUSD' | 'durationDays'>('closedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  // Auto-fill when wallet connects
+  useEffect(() => {
+    if (authenticated && connectedWallet && !wallet) {
+      setInputWallet(connectedWallet);
+      setWallet(connectedWallet);
+      navigate(`/history?wallet=${encodeURIComponent(connectedWallet)}`, { replace: true });
+    }
+  }, [authenticated, connectedWallet]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadHistory(w: string) {
     if (!w.trim()) return;
@@ -89,25 +113,19 @@ export default function History() {
     return sortDir === 'asc' ? diff : -diff;
   });
 
-  // Summary stats
   const totalReturn = positions.reduce((s, p) => s + p.totalReturnUSD, 0);
   const totalFees = positions.reduce((s, p) => s + p.feesEarned, 0);
   const winners = positions.filter((p) => p.totalReturnPercent >= 0).length;
 
-  const SortHeader = ({
-    col,
-    label,
-  }: {
-    col: typeof sortBy;
-    label: string;
-  }) => (
+  const SortHeader = ({ col, label }: { col: typeof sortBy; label: string }) => (
     <th
-      className="px-4 py-3 text-left text-xs text-gray-400 cursor-pointer hover:text-white select-none"
+      className="px-4 py-3 text-left text-xs cursor-pointer select-none transition-colors hover:text-white"
+      style={{ color: '#888888' }}
       onClick={() => toggleSort(col)}
     >
       <span className="flex items-center gap-1">
         {label}
-        <span className="text-gray-600">
+        <span style={{ color: '#444444' }}>
           {sortBy === col ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
         </span>
       </span>
@@ -115,24 +133,28 @@ export default function History() {
   );
 
   return (
-    <div>
+    <div className="max-w-4xl mx-auto px-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white mb-2">Position History</h1>
-        <p className="text-gray-400 text-sm mb-4">All closed LP positions for a wallet.</p>
-        <form onSubmit={handleSubmit} className="flex gap-2 max-w-2xl">
+        <h1 className="text-2xl font-black text-white mb-1">Position History</h1>
+        <p className="text-sm mb-5" style={{ color: '#888888' }}>
+          {authenticated && connectedWallet
+            ? 'Showing closed positions for your connected wallet.'
+            : 'All closed LP positions for a wallet.'}
+        </p>
+        <form onSubmit={handleSubmit} className="flex gap-2 w-full">
           <input
             type="text"
             value={inputWallet}
             onChange={(e) => setInputWallet(e.target.value)}
             placeholder="Solana wallet address…"
-            className="flex-1 rounded-xl border px-4 py-2.5 text-white text-sm outline-none focus:border-emerald-500 font-mono"
-            style={{ background: '#12131a', borderColor: '#2a2d38' }}
+            className="flex-1 rounded-xl border px-4 py-2.5 text-white text-sm outline-none font-mono focus:border-[#00ff85] transition-colors"
+            style={{ background: '#111111', borderColor: '#1e1e1e' }}
           />
           <button
             type="submit"
-            className="px-5 py-2.5 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
-            style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}
+            className="px-5 py-2.5 rounded-xl text-sm font-bold transition-opacity hover:opacity-90"
+            style={{ background: '#00ff85', color: '#000000' }}
           >
             Load
           </button>
@@ -141,15 +163,18 @@ export default function History() {
 
       {loading && (
         <div className="text-center py-16">
-          <div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-gray-400 text-sm">Loading history…</p>
+          <div
+            className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3"
+            style={{ borderColor: '#00ff85', borderTopColor: 'transparent' }}
+          />
+          <p className="text-sm" style={{ color: '#888888' }}>Loading history…</p>
         </div>
       )}
 
       {error && (
         <div
-          className="rounded-xl border p-4 text-red-400 text-sm"
-          style={{ borderColor: '#ef444430', background: '#ef444415' }}
+          className="rounded-xl border p-4 text-sm"
+          style={{ borderColor: '#ff444430', background: '#ff444415', color: '#ff4444' }}
         >
           {error}
         </div>
@@ -160,24 +185,25 @@ export default function History() {
           {/* Summary cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             {[
-              { label: 'Closed Positions', value: String(positions.length) },
+              { label: 'Closed Positions', value: String(positions.length), accent: false, negative: false },
               {
                 label: 'Total Return',
                 value: `${totalReturn >= 0 ? '+' : ''}$${fmt(totalReturn)}`,
                 accent: totalReturn >= 0,
                 negative: totalReturn < 0,
               },
-              { label: 'Total Fees Earned', value: `$${fmt(totalFees)}`, accent: true },
-              { label: 'Win Rate', value: `${((winners / positions.length) * 100).toFixed(0)}%` },
+              { label: 'Total Fees Earned', value: `$${fmt(totalFees)}`, accent: true, negative: false },
+              { label: 'Win Rate', value: `${((winners / positions.length) * 100).toFixed(0)}%`, accent: false, negative: false },
             ].map(({ label, value, accent, negative }) => (
               <div
                 key={label}
                 className="rounded-xl border p-4"
-                style={{ background: '#12131a', borderColor: '#1e2228' }}
+                style={{ background: '#111111', borderColor: '#1e1e1e' }}
               >
-                <div className="text-gray-400 text-xs mb-1">{label}</div>
+                <div className="text-xs mb-1" style={{ color: '#888888' }}>{label}</div>
                 <div
-                  className={`text-xl font-semibold ${accent ? 'text-emerald-400' : negative ? 'text-red-400' : 'text-white'}`}
+                  className="text-xl font-bold"
+                  style={{ color: accent ? '#00ff85' : negative ? '#ff4444' : '#ffffff' }}
                 >
                   {value}
                 </div>
@@ -186,20 +212,20 @@ export default function History() {
           </div>
 
           {/* Desktop table */}
-          <div className="hidden md:block rounded-xl border overflow-hidden" style={{ borderColor: '#1e2228' }}>
+          <div className="hidden md:block rounded-xl border overflow-hidden" style={{ borderColor: '#1e1e1e' }}>
             <table className="w-full">
-              <thead style={{ background: '#0e0f14' }}>
+              <thead style={{ background: '#0a0a0a' }}>
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs text-gray-400">Pool</th>
-                  <th className="px-4 py-3 text-left text-xs text-gray-400">Strategy</th>
+                  <th className="px-4 py-3 text-left text-xs" style={{ color: '#888888' }}>Pool</th>
+                  <th className="px-4 py-3 text-left text-xs" style={{ color: '#888888' }}>Strategy</th>
                   <SortHeader col="durationDays" label="Duration" />
-                  <th className="px-4 py-3 text-left text-xs text-gray-400">Value</th>
-                  <th className="px-4 py-3 text-left text-xs text-gray-400">Fees</th>
+                  <th className="px-4 py-3 text-left text-xs" style={{ color: '#888888' }}>Value</th>
+                  <th className="px-4 py-3 text-left text-xs" style={{ color: '#888888' }}>Fees</th>
                   <SortHeader col="totalReturnUSD" label="Total Return" />
                   <SortHeader col="closedAt" label="Closed" />
                 </tr>
               </thead>
-              <tbody className="divide-y" style={{ borderColor: '#1e2228' }}>
+              <tbody style={{ borderColor: '#1e1e1e' }}>
                 {sorted.map((pos) => {
                   const closedDate = new Date(pos.closedAt).toLocaleDateString('en-US', {
                     month: 'short', day: 'numeric', year: 'numeric',
@@ -207,19 +233,22 @@ export default function History() {
                   return (
                     <tr
                       key={pos.positionAddress}
-                      className="hover:bg-white/[0.02] transition-colors"
+                      className="border-t transition-colors"
+                      style={{ borderColor: '#1e1e1e' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#ffffff05')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <div
                             className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                            style={{ background: 'linear-gradient(135deg, #10b981, #6366f1)' }}
+                            style={{ background: '#00ff8520', color: '#00ff85', border: '1px solid #00ff8540' }}
                           >
                             {pos.tokenX.symbol[0]}
                           </div>
                           <div>
-                            <div className="text-white text-sm">{pos.poolName}</div>
-                            <div className="text-gray-500 text-xs font-mono">
+                            <div className="text-white text-sm font-medium">{pos.poolName}</div>
+                            <div className="text-xs font-mono" style={{ color: '#555555' }}>
                               {pos.positionAddress.slice(0, 8)}…
                             </div>
                           </div>
@@ -230,11 +259,11 @@ export default function History() {
                       </td>
                       <td className="px-4 py-3 text-white text-sm">{pos.durationDays}d</td>
                       <td className="px-4 py-3 text-white text-sm">${fmt(pos.totalValueUSD)}</td>
-                      <td className="px-4 py-3 text-emerald-400 text-sm">+${fmt(pos.feesEarned)}</td>
+                      <td className="px-4 py-3 text-sm font-medium" style={{ color: '#00ff85' }}>+${fmt(pos.feesEarned)}</td>
                       <td className="px-4 py-3">
                         <ReturnCell pct={pos.totalReturnPercent} usd={pos.totalReturnUSD} />
                       </td>
-                      <td className="px-4 py-3 text-gray-400 text-sm">{closedDate}</td>
+                      <td className="px-4 py-3 text-sm" style={{ color: '#888888' }}>{closedDate}</td>
                     </tr>
                   );
                 })}
@@ -252,34 +281,34 @@ export default function History() {
                 <div
                   key={pos.positionAddress}
                   className="rounded-xl border p-4"
-                  style={{ background: '#12131a', borderColor: '#1e2228' }}
+                  style={{ background: '#111111', borderColor: '#1e1e1e' }}
                 >
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <div
                         className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-                        style={{ background: 'linear-gradient(135deg, #10b981, #6366f1)' }}
+                        style={{ background: '#00ff8520', color: '#00ff85', border: '1px solid #00ff8540' }}
                       >
                         {pos.tokenX.symbol[0]}
                       </div>
                       <div>
-                        <div className="text-white text-sm font-medium">{pos.poolName}</div>
-                        <div className="text-gray-500 text-xs">{closedDate} · {pos.durationDays}d</div>
+                        <div className="text-white text-sm font-bold">{pos.poolName}</div>
+                        <div className="text-xs" style={{ color: '#555555' }}>{closedDate} · {pos.durationDays}d</div>
                       </div>
                     </div>
                     <StrategyBadge s={pos.strategy} />
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
-                      <div className="text-gray-500 text-xs">Value</div>
+                      <div className="text-xs mb-0.5" style={{ color: '#888888' }}>Value</div>
                       <div className="text-white text-sm">${fmt(pos.totalValueUSD)}</div>
                     </div>
                     <div>
-                      <div className="text-gray-500 text-xs">Fees</div>
-                      <div className="text-emerald-400 text-sm">+${fmt(pos.feesEarned)}</div>
+                      <div className="text-xs mb-0.5" style={{ color: '#888888' }}>Fees</div>
+                      <div className="text-sm font-medium" style={{ color: '#00ff85' }}>+${fmt(pos.feesEarned)}</div>
                     </div>
                     <div>
-                      <div className="text-gray-500 text-xs">Return</div>
+                      <div className="text-xs mb-0.5" style={{ color: '#888888' }}>Return</div>
                       <ReturnCell pct={pos.totalReturnPercent} usd={pos.totalReturnUSD} />
                     </div>
                   </div>
@@ -291,19 +320,23 @@ export default function History() {
       )}
 
       {!loading && !error && positions.length === 0 && wallet && (
-        <div className="text-center py-12 text-gray-500">
-          No closed positions found for this wallet.
+        <div
+          className="rounded-xl border flex flex-col items-center justify-center min-h-[400px] text-center"
+          style={{ background: '#111111', borderColor: '#1e1e1e' }}
+        >
+          <HistoryIcon className="w-8 h-8 mx-auto mb-4" style={{ color: '#888888' }} />
+          <p style={{ color: '#888888' }}>No closed positions found for this wallet.</p>
         </div>
       )}
 
       {!loading && !error && !wallet && (
         <div
-          className="rounded-xl border p-12 text-center"
-          style={{ background: '#12131a', borderColor: '#1e2228' }}
+          className="rounded-xl border flex flex-col items-center justify-center min-h-[400px] text-center"
+          style={{ background: '#111111', borderColor: '#1e1e1e' }}
         >
-          <div className="text-4xl mb-3">📋</div>
-          <p className="text-gray-400">Enter a wallet address to view closed position history.</p>
-          <p className="text-gray-600 text-sm mt-1">Demo mode returns 3 sample closed positions.</p>
+          <HistoryIcon className="w-8 h-8 mx-auto mb-4" style={{ color: '#888888' }} />
+          <p style={{ color: '#888888' }}>Enter a wallet address to view closed position history.</p>
+          <p className="text-sm mt-1" style={{ color: '#444444' }}>Demo mode returns 3 sample closed positions.</p>
         </div>
       )}
     </div>

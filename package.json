@@ -14,10 +14,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
+    "@privy-io/react-auth": "^3.22.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "groq-sdk": "^1.1.2",
+    "lucide-react": "^1.9.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",

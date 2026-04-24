@@ -80,6 +80,7 @@ export interface ChatMessage {
     recommendation?: LiquidityRecommendation;
   };
   isLoading?: boolean;
+  isRateLimit?: boolean;
 }
 
 export interface LiquidityRecommendation {

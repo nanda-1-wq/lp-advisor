@@ -73,14 +73,29 @@ export async function runAdvisor(
 
   // ── 1. Pre-fetch pool data ────────────────────────────────────────────────
   const poolsRes = await lp.discoverPools({ sortBy: 'vol_24h', sortOrder: 'desc', pageSize: 5 });
-  const pools = (poolsRes as { data?: unknown[] }).data ?? [];
+  // Real API may return { data: [...] } or just [...] — normalise to array
+  const poolsRaw = poolsRes as unknown;
+  const pools: unknown[] = Array.isArray(poolsRaw)
+    ? poolsRaw
+    : Array.isArray((poolsRaw as Record<string, unknown>)?.data)
+      ? ((poolsRaw as Record<string, unknown>).data as unknown[])
+      : [];
 
-  // Enrich each pool with activeBin + currentPrice from pool info
+  // Enrich each pool with activeBin + currentPrice from pool info.
+  // Guard against: missing address field, API 500s for unknown IDs.
   const richPools = await Promise.all(
-    (pools as Array<{ address: string }>).map(async (pool) => {
-      const infoRes = await lp.getPoolInfo(pool.address);
-      const info = (infoRes as { data?: Record<string, unknown> }).data ?? {};
-      return { ...pool, activeBin: info.activeBin, currentPrice: info.currentPrice };
+    (pools as Array<Record<string, unknown>>).map(async (pool) => {
+      // Real API may use 'address', 'poolAddress', or 'id'
+      const poolAddr = (pool.address ?? pool.poolAddress ?? pool.id) as string | undefined;
+      if (!poolAddr) return pool; // no address — skip enrichment
+      try {
+        const infoRes = await lp.getPoolInfo(poolAddr);
+        const info = ((infoRes as Record<string, unknown>)?.data ?? infoRes) as Record<string, unknown>;
+        return { ...pool, activeBin: info.activeBin, currentPrice: info.currentPrice };
+      } catch (err) {
+        console.warn(`[claude] getPoolInfo(${poolAddr}) failed — using base pool data:`, (err as Error).message);
+        return pool; // enrichment failed; keep base pool data, don't crash
+      }
     })
   );
 
