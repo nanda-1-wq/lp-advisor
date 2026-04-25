@@ -56,6 +56,8 @@ LP Advisor is an AI-powered liquidity provision advisor for Meteora pools on Sol
 
 ## Live Demo
 
+Live App: https://lp-advisor.vercel.app
+
 Watch the full demo: https://youtu.be/tFPU3HxDPPA
 
 Features shown in demo:
