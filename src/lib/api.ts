@@ -13,8 +13,9 @@ import type {
   ZapOutTxResponse,
   ApiResponse,
 } from './types';
+import { API_BASE } from './apiBase';
 
-const BASE = '/api';
+const BASE = `${API_BASE}/api`;
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
