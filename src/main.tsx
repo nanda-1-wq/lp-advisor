@@ -26,9 +26,6 @@ createRoot(document.getElementById('root')!).render(
           landingHeader: 'Connect to LP Advisor',
           loginMessage: 'Select a wallet or sign in with email to continue',
         },
-        embeddedWallets: {
-          createOnLogin: 'off',
-        },
       }}
     >
       <App />
