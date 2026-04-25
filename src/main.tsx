@@ -4,6 +4,13 @@ import { PrivyProvider } from '@privy-io/react-auth';
 import './index.css';
 import App from './App.tsx';
 
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('Unhandled promise rejection:', e.reason);
+});
+window.onerror = (msg, src, line, col, err) => {
+  console.error('Global error:', msg, err);
+};
+
 const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID as string;
 
 if (!PRIVY_APP_ID) {
