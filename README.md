@@ -3,10 +3,11 @@
 > Built on LPAgent.io API · Superteam Frontier Hackathon submission
 
 ## Demo
-
-Demo Video: https://youtu.be/tFPU3HxDPPA
+Live App: https://lp-advisor.vercel.app
 
 GitHub: https://github.com/nanda-1-wq/lp-advisor
+
+Demo Video: https://youtu.be/tFPU3HxDPPA
 
 ## Screenshots
 
@@ -55,8 +56,6 @@ LP Advisor is an AI-powered liquidity provision advisor for Meteora pools on Sol
 - LPAgent.io API for all LP data
 
 ## Live Demo
-
-Live App: https://lp-advisor.vercel.app
 
 Watch the full demo: https://youtu.be/tFPU3HxDPPA
 
