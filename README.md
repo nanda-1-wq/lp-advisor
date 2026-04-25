@@ -2,6 +2,16 @@
 
 > Built on LPAgent.io API · Superteam Frontier Hackathon submission
 
+## Demo
+
+Demo Video: https://youtu.be/tFPU3HxDPPA
+
+GitHub: https://github.com/nanda-1-wq/lp-advisor
+
+## Screenshots
+
+![LP Advisor Home](public/home.png)
+
 ## What it does
 
 LP Advisor is an AI-powered liquidity provision advisor for Meteora pools on Solana. It uses the LPAgent.io API to help users discover pools, analyze portfolios, and execute Zap-In/Zap-Out transactions - all through a natural language AI chat interface.
@@ -43,6 +53,24 @@ LP Advisor is an AI-powered liquidity provision advisor for Meteora pools on Sol
 - Privy for wallet authentication
 
 - LPAgent.io API for all LP data
+
+## Live Demo
+
+Watch the full demo: https://youtu.be/tFPU3HxDPPA
+
+Features shown in demo:
+
+- Wallet connection via Privy
+
+- AI pool discovery using LPAgent API
+
+- Add Liquidity (Zap-In) flow
+
+- Portfolio tracking with bin range visualization
+
+- Zap-Out with custom amount
+
+- Position history with win rate
 
 ## Setup
 
