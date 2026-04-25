@@ -13,4 +13,17 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    exclude: ['@privy-io/react-auth'],
+  },
+  build: {
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
+  },
+  resolve: {
+    alias: {
+      '@noble/secp256k1': '@noble/secp256k1',
+    },
+  },
 })
