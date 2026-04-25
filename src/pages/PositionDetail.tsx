@@ -3,6 +3,7 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle, ArrowRight } from 'lucide-react';
 import { getOpenPositions, getZapOutQuote, generateZapOutTx, submitZapOut } from '../lib/api';
 import type { Position } from '../lib/types';
+import { removePendingPosition, saveClosedPosition } from '../lib/pendingPositions';
 
 const OUTPUT_TYPES = [
   { id: 'allToken0', label: 'All Token X (SOL)' },
@@ -106,6 +107,20 @@ export default function PositionDetail() {
         meta: txRes.data.meta,
       });
       if (!submitRes.success) throw new Error(submitRes.error ?? 'Submission failed');
+
+      // Archive to closed positions, then remove from pending
+      const durationDays = Math.max(
+        1,
+        Math.floor((Date.now() - new Date(position.openedAt).getTime()) / (1000 * 60 * 60 * 24))
+      );
+      saveClosedPosition({
+        ...position,
+        closedAt: new Date().toISOString(),
+        totalReturnUSD: position.pnlUSD,
+        totalReturnPercent: position.pnlPercent,
+        durationDays,
+      });
+      removePendingPosition(position.positionAddress);
 
       setWithdrawResult({ signature: submitRes.data?.signature });
       setWithdrawStep('done');

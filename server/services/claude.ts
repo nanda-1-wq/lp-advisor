@@ -55,7 +55,15 @@ IMPORTANT: Only mention specific pool data (APR, TVL, pool names) when the user 
 const WALLET_RE = /[1-9A-HJ-NP-Za-km-z]{32,44}/g;
 
 // Keywords that trigger pool cards — "invest" alone does NOT qualify
-const POOL_QUERY_RE = /\bpool\b|\blp\b|liquidity|zap|add liquidity|invest in pool|deposit/i;
+const POOL_QUERY_RE = /\bpool\b|\blp\b|liquidity|zap|add liquidity|invest in pool|deposit|highest apr|top pools|best pools|find me|recommend|which pool/i;
+
+// Known pool names — if the AI response mentions any of these, show pool cards
+const KNOWN_POOL_NAMES = ['BONK-SOL', 'WIF-USDC', 'SOL-USDC', 'SOL-USDT', 'USDC-USDT', 'JUP-USDC'];
+
+// Normalize pool name for comparison: "BONK/SOL" or "bonk-sol" → "BONK-SOL"
+function normalizeName(n: string): string {
+  return n.toUpperCase().replace('/', '-');
+}
 
 export interface AdvisorResult {
   text: string;
@@ -134,12 +142,36 @@ export async function runAdvisor(
 
   // ── 6. Attach pool cards only when the query is pool-related ──────────────
   const lastUserMsg = messages.findLast((m) => m.role === 'user')?.content ?? '';
-  const showPools = POOL_QUERY_RE.test(lastUserMsg);
+  const queryWantsPool = POOL_QUERY_RE.test(lastUserMsg);
+
+  // Which known pool names appear in the AI response text?
+  const mentionedNames = KNOWN_POOL_NAMES.filter((name) =>
+    text.toUpperCase().includes(name.toUpperCase())
+  );
+
+  const showPools = queryWantsPool || mentionedNames.length > 0;
+
+  // Prefer the specific pools the AI actually mentioned; fall back to top 3 by APR
+  let poolsToReturn: unknown[] = [];
+  if (showPools) {
+    if (mentionedNames.length > 0) {
+      poolsToReturn = (richPools as PoolRaw[]).filter((pool) => {
+        const poolName = normalizeName((pool.pairName ?? pool.name ?? '') as string);
+        return mentionedNames.some((mn) => poolName.includes(mn));
+      });
+    }
+    // Fall back to top 3 by APR when no specific match is found
+    if (poolsToReturn.length === 0) {
+      poolsToReturn = [...(richPools as PoolRaw[])]
+        .sort((a, b) => ((b.apr as number) ?? 0) - ((a.apr as number) ?? 0))
+        .slice(0, 3);
+    }
+  }
 
   return {
     text,
     toolData: {
-      ...(showPools && { pools: richPools }),
+      ...(showPools && { pools: poolsToReturn }),
       ...(positions.length > 0 && { positions }),
       ...(overview && { overview }),
     },

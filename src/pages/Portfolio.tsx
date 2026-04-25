@@ -7,6 +7,7 @@ import {
 import { usePrivy } from '@privy-io/react-auth';
 import { getOpenPositions, getPortfolioOverview, getHistoricalPositions } from '../lib/api';
 import type { Position, HistoricalPosition, PortfolioOverview } from '../lib/types';
+import { getPendingPositions, getPendingAddresses } from '../lib/pendingPositions';
 
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 
@@ -149,7 +150,7 @@ function StrategyBadge({ s }: { s: string }) {
   );
 }
 
-function PositionCard({ pos, onView }: { pos: Position; onView: (p: Position) => void }) {
+function PositionCard({ pos, onView, isNew }: { pos: Position; onView: (p: Position) => void; isNew?: boolean }) {
   const pnlPercent = typeof pos.pnlPercent === 'number' ? pos.pnlPercent : 0;
   const pnlPos = pnlPercent >= 0;
   const openDate = safeDate(pos.openedAt, { month: 'short', day: 'numeric' });
@@ -177,7 +178,14 @@ function PositionCard({ pos, onView }: { pos: Position; onView: (p: Position) =>
             {safeSymbol(pos.tokenX)}
           </div>
           <div>
-            <div className="text-white font-bold">{pos.poolName || '—'}</div>
+            <div className="flex items-center gap-2">
+              <div className="text-white font-bold">{pos.poolName || '—'}</div>
+              {isNew && (
+                <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#00ff8530', color: '#00ff85', border: '1px solid #00ff8550' }}>
+                  New
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1.5 mt-0.5">
               <StrategyBadge s={pos.strategy || ''} />
               <span style={{ color: '#333333' }} className="text-xs">·</span>
@@ -264,7 +272,7 @@ function PositionCard({ pos, onView }: { pos: Position; onView: (p: Position) =>
   );
 }
 
-function OpenPositionsTable({ positions, onView }: { positions: Position[]; onView: (p: Position) => void }) {
+function OpenPositionsTable({ positions, onView, pendingAddrs }: { positions: Position[]; onView: (p: Position) => void; pendingAddrs: Set<string> }) {
   return (
     <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#1e1e1e' }}>
       <table className="w-full">
@@ -297,7 +305,14 @@ function OpenPositionsTable({ positions, onView }: { positions: Position[]; onVi
                       {safeSymbol(pos.tokenX)}
                     </div>
                     <div>
-                      <div className="text-white text-sm font-medium">{pos.poolName || '—'}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-white text-sm font-medium">{pos.poolName || '—'}</span>
+                        {pendingAddrs.has(pos.positionAddress) && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#00ff8530', color: '#00ff85', border: '1px solid #00ff8550' }}>
+                            New
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs font-mono" style={{ color: '#555555' }}>
                         {safeSlice(pos.positionAddress)}…
                       </div>
@@ -472,8 +487,16 @@ function PortfolioInner() {
 
   async function loadAll(w: string) {
     if (!w.trim()) return;
+    // Clear previous data immediately so the UI shows a fresh load
+    setPositions([]);
+    setOverview(null);
+    setHistoricalPositions([]);
+    setHasFetched(false);
     setLoading(true);
     setError('');
+
+    // Simulate realistic API latency for demo
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     try {
       // Fire all three independently — a rejected promise won't kill the others
@@ -543,15 +566,18 @@ function PortfolioInner() {
     }
   }
 
+  // Auto-load only when arriving with a wallet in the URL (e.g. from Home page)
   useEffect(() => {
-    if (wallet) loadAll(wallet);
-  }, [wallet]); // eslint-disable-line react-hooks/exhaustive-deps
+    const urlWallet = searchParams.get('wallet');
+    if (urlWallet) loadAll(urlWallet);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const w = inputWallet.trim();
     setWallet(w);
     navigate(`/portfolio?wallet=${encodeURIComponent(w)}`, { replace: true });
+    loadAll(w);
   }
 
   function handleCopy() {
@@ -564,14 +590,21 @@ function PortfolioInner() {
   const safePos = Array.isArray(positions) ? positions : [];
   const safeHist = Array.isArray(historicalPositions) ? historicalPositions : [];
 
-  const openFees = safePos.reduce((s, p) => s + (typeof p.feesEarned === 'number' ? p.feesEarned : 0), 0);
+  // Merge positions added via Zap-In (stored in localStorage) that aren't yet in the API response
+  const pendingPositions = hasFetched ? getPendingPositions() : [];
+  const apiAddrs = new Set(safePos.map((p) => p.positionAddress));
+  const pendingNew = pendingPositions.filter((p) => !apiAddrs.has(p.positionAddress));
+  const pendingAddrs = hasFetched ? getPendingAddresses() : new Set<string>();
+  const allPositions = [...safePos, ...pendingNew];
+
+  const openFees = allPositions.reduce((s, p) => s + (typeof p.feesEarned === 'number' ? p.feesEarned : 0), 0);
   const histFees = safeHist.reduce((s, p) => s + (typeof p.feesEarned === 'number' ? p.feesEarned : 0), 0);
   const allTimeFees = openFees + histFees;
   const histWinners = safeHist.filter((p) => (typeof p.totalReturnPercent === 'number' ? p.totalReturnPercent : 0) >= 0).length;
   const winRate = safeHist.length > 0 ? (histWinners / safeHist.length) * 100 : null;
-  const totalOpenValue = safePos.reduce((s, p) => s + (typeof p.totalValueUSD === 'number' ? p.totalValueUSD : 0), 0);
-  const totalOpenPnl = safePos.reduce((s, p) => s + (typeof p.pnlUSD === 'number' ? p.pnlUSD : 0), 0);
-  const outOfRange = safePos.filter((p) => !p.isInRange);
+  const totalOpenValue = allPositions.reduce((s, p) => s + (typeof p.totalValueUSD === 'number' ? p.totalValueUSD : 0), 0);
+  const totalOpenPnl = allPositions.reduce((s, p) => s + (typeof p.pnlUSD === 'number' ? p.pnlUSD : 0), 0);
+  const outOfRange = allPositions.filter((p) => !p.isInRange);
 
   const loaded = !loading && hasFetched;
 
@@ -688,7 +721,7 @@ function PortfolioInner() {
             <StatCard
               label="Total Net Worth"
               value={`$${fmt(totalOpenValue)}`}
-              sub={`${safePos.length} open position${safePos.length !== 1 ? 's' : ''}`}
+              sub={`${allPositions.length} open position${allPositions.length !== 1 ? 's' : ''}`}
             />
             <StatCard
               label="Win Rate"
@@ -743,7 +776,7 @@ function PortfolioInner() {
               <h2 className="text-lg font-bold text-white">
                 Open Positions
                 <span className="text-sm font-normal ml-2" style={{ color: '#888888' }}>
-                  ({safePos.length})
+                  ({allPositions.length})
                 </span>
               </h2>
               <div className="flex items-center gap-1">
@@ -775,7 +808,7 @@ function PortfolioInner() {
             </div>
 
             {/* Summary bar */}
-            {safePos.length > 0 && (
+            {allPositions.length > 0 && (
               <div
                 className="flex items-center gap-6 px-4 py-2.5 rounded-xl border mb-4 flex-wrap"
                 style={{ background: '#0a0a0a', borderColor: '#1e1e1e' }}
@@ -793,8 +826,8 @@ function PortfolioInner() {
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs" style={{ color: '#555555' }}>In range</span>
                   <span className="text-sm font-bold text-white">
-                    {overview?.inRangeCount ?? safePos.filter(p => p.isInRange).length}/
-                    {overview?.positionCount ?? safePos.length}
+                    {overview?.inRangeCount ?? allPositions.filter(p => p.isInRange).length}/
+                    {overview?.positionCount ?? allPositions.length}
                   </span>
                   {(overview?.outOfRangeCount ?? outOfRange.length) > 0 && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: '#ff444420', color: '#ff4444' }}>
@@ -805,7 +838,7 @@ function PortfolioInner() {
               </div>
             )}
 
-            {safePos.length === 0 ? (
+            {allPositions.length === 0 ? (
               <div
                 className="rounded-xl border p-12 flex flex-col items-center justify-center min-h-[200px]"
                 style={{ background: '#111111', borderColor: '#1e1e1e' }}
@@ -815,17 +848,19 @@ function PortfolioInner() {
               </div>
             ) : viewMode === 'card' ? (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {safePos.map((pos, i) => (
+                {allPositions.map((pos, i) => (
                   <PositionCard
                     key={pos.positionAddress || i}
                     pos={pos}
+                    isNew={pendingAddrs.has(pos.positionAddress)}
                     onView={(p) => navigate(`/portfolio/${p.positionAddress}`, { state: { position: p } })}
                   />
                 ))}
               </div>
             ) : (
               <OpenPositionsTable
-                positions={safePos}
+                positions={allPositions}
+                pendingAddrs={pendingAddrs}
                 onView={(p) => navigate(`/portfolio/${p.positionAddress}`, { state: { position: p } })}
               />
             )}

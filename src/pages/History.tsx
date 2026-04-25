@@ -4,6 +4,7 @@ import { History as HistoryIcon } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import { getHistoricalPositions } from '../lib/api';
 import type { HistoricalPosition } from '../lib/types';
+import { getClosedPositions, getClosedAddresses } from '../lib/pendingPositions';
 
 function getConnectedWallet(user: ReturnType<typeof usePrivy>['user']): string | null {
   if (!user) return null;
@@ -57,6 +58,7 @@ export default function History() {
   const [inputWallet, setInputWallet] = useState(wallet);
   const [positions, setPositions] = useState<HistoricalPosition[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hasFetched, setHasFetched] = useState(false);
   const [error, setError] = useState('');
   const [sortBy, setSortBy] = useState<'closedAt' | 'totalReturnUSD' | 'durationDays'>('closedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -82,18 +84,22 @@ export default function History() {
       setError(e instanceof Error ? e.message : 'Failed to load history');
     } finally {
       setLoading(false);
+      setHasFetched(true);
     }
   }
 
+  // Auto-load only when arriving with a wallet in the URL (e.g. from Portfolio page)
   useEffect(() => {
-    if (wallet) loadHistory(wallet);
-  }, [wallet]);
+    const urlWallet = searchParams.get('wallet');
+    if (urlWallet) loadHistory(urlWallet);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const w = inputWallet.trim();
     setWallet(w);
     navigate(`/history?wallet=${encodeURIComponent(w)}`, { replace: true });
+    loadHistory(w);
   }
 
   function toggleSort(col: typeof sortBy) {
@@ -105,7 +111,15 @@ export default function History() {
     }
   }
 
-  const sorted = [...positions].sort((a, b) => {
+  // Merge localStorage closed positions (from Zap-Out) with API results
+  const closedFromStorage = hasFetched ? getClosedPositions() : [];
+  const apiAddrs = new Set(positions.map((p) => p.positionAddress));
+  const storageNew = closedFromStorage.filter((p) => !apiAddrs.has(p.positionAddress));
+  const closedAddrs = hasFetched ? getClosedAddresses() : new Set<string>();
+  // localStorage ones prepended so they appear at the top (most recent)
+  const allHistory = [...storageNew, ...positions];
+
+  const sorted = [...allHistory].sort((a, b) => {
     let diff = 0;
     if (sortBy === 'closedAt') diff = new Date(a.closedAt).getTime() - new Date(b.closedAt).getTime();
     else if (sortBy === 'totalReturnUSD') diff = a.totalReturnUSD - b.totalReturnUSD;
@@ -113,9 +127,9 @@ export default function History() {
     return sortDir === 'asc' ? diff : -diff;
   });
 
-  const totalReturn = positions.reduce((s, p) => s + p.totalReturnUSD, 0);
-  const totalFees = positions.reduce((s, p) => s + p.feesEarned, 0);
-  const winners = positions.filter((p) => p.totalReturnPercent >= 0).length;
+  const totalReturn = allHistory.reduce((s, p) => s + p.totalReturnUSD, 0);
+  const totalFees = allHistory.reduce((s, p) => s + p.feesEarned, 0);
+  const winners = allHistory.filter((p) => p.totalReturnPercent >= 0).length;
 
   const SortHeader = ({ col, label }: { col: typeof sortBy; label: string }) => (
     <th
@@ -180,12 +194,12 @@ export default function History() {
         </div>
       )}
 
-      {!loading && positions.length > 0 && (
+      {!loading && hasFetched && allHistory.length > 0 && (
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             {[
-              { label: 'Closed Positions', value: String(positions.length), accent: false, negative: false },
+              { label: 'Closed Positions', value: String(allHistory.length), accent: false, negative: false },
               {
                 label: 'Total Return',
                 value: `${totalReturn >= 0 ? '+' : ''}$${fmt(totalReturn)}`,
@@ -193,7 +207,7 @@ export default function History() {
                 negative: totalReturn < 0,
               },
               { label: 'Total Fees Earned', value: `$${fmt(totalFees)}`, accent: true, negative: false },
-              { label: 'Win Rate', value: `${((winners / positions.length) * 100).toFixed(0)}%`, accent: false, negative: false },
+              { label: 'Win Rate', value: `${((winners / allHistory.length) * 100).toFixed(0)}%`, accent: false, negative: false },
             ].map(({ label, value, accent, negative }) => (
               <div
                 key={label}
@@ -247,7 +261,14 @@ export default function History() {
                             {pos.tokenX.symbol[0]}
                           </div>
                           <div>
-                            <div className="text-white text-sm font-medium">{pos.poolName}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-white text-sm font-medium">{pos.poolName}</span>
+                              {closedAddrs.has(pos.positionAddress) && (
+                                <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#00ff8530', color: '#00ff85', border: '1px solid #00ff8550' }}>
+                                  New
+                                </span>
+                              )}
+                            </div>
                             <div className="text-xs font-mono" style={{ color: '#555555' }}>
                               {pos.positionAddress.slice(0, 8)}…
                             </div>
@@ -292,7 +313,14 @@ export default function History() {
                         {pos.tokenX.symbol[0]}
                       </div>
                       <div>
-                        <div className="text-white text-sm font-bold">{pos.poolName}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-white text-sm font-bold">{pos.poolName}</span>
+                          {closedAddrs.has(pos.positionAddress) && (
+                            <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#00ff8530', color: '#00ff85', border: '1px solid #00ff8550' }}>
+                              New
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs" style={{ color: '#555555' }}>{closedDate} · {pos.durationDays}d</div>
                       </div>
                     </div>
@@ -319,7 +347,7 @@ export default function History() {
         </>
       )}
 
-      {!loading && !error && positions.length === 0 && wallet && (
+      {!loading && hasFetched && allHistory.length === 0 && wallet && (
         <div
           className="rounded-xl border flex flex-col items-center justify-center min-h-[400px] text-center"
           style={{ background: '#111111', borderColor: '#1e1e1e' }}

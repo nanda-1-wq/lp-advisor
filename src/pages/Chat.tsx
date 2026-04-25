@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { Bot, CheckCircle, AlertTriangle, ArrowRight, Send, Paperclip, Copy, Pencil, X } from 'lucide-react';
 import { sendChatMessage } from '../lib/api';
 import type { ChatMessage, Pool } from '../lib/types';
+import { savePendingPosition } from '../lib/pendingPositions';
 
 let idCounter = 0;
 const uid = () => `msg-${++idCounter}-${Date.now()}`;
@@ -123,6 +124,27 @@ function AddLiquidityModal({ pool, onClose }: { pool: Pool; onClose: () => void 
       });
 
       if (!submitRes.success) throw new Error(submitRes.error ?? 'Submission failed');
+
+      // Persist the new position so Portfolio can show it immediately
+      const positionAddress = res.data.meta.positionPubKey ?? `zap-${Date.now()}`;
+      savePendingPosition({
+        positionAddress,
+        poolAddress: pool.address,
+        poolName: pool.name,
+        tokenX: { symbol: pool.tokenX.symbol, amount: parseFloat(amount) * 0.5 },
+        tokenY: { symbol: pool.tokenY.symbol, amount: 0 },
+        totalValueUSD: parseFloat(amount) * 150,
+        pnlPercent: 0,
+        pnlUSD: 0,
+        feesEarned: 0,
+        isInRange: true,
+        lowerBin: 8354,
+        upperBin: 8422,
+        activeBin: 8388,
+        strategy: 'Spot',
+        openedAt: new Date().toISOString(),
+      });
+
       setTxData({ signature: submitRes.data?.signature });
       setStep('done');
     } catch (err) {
@@ -375,7 +397,7 @@ function MessageBubble({
         {/* Pool cards */}
         {!isUser && msg.toolData?.pools && msg.toolData.pools.length > 0 && (
           <div className="w-full space-y-2">
-            {msg.toolData.pools.slice(0, 3).map((pool) => (
+            {msg.toolData.pools.map((pool) => (
               <PoolCard key={pool.address} pool={pool} onAddLiquidity={onAddLiquidity} />
             ))}
           </div>
