@@ -1,5 +1,4 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { usePrivy } from '@privy-io/react-auth';
 
 const NAV = [
   { to: '/', label: 'Home', exact: true },
@@ -8,21 +7,6 @@ const NAV = [
   { to: '/history', label: 'History' },
 ];
 
-/** Returns the best displayable address from any linked account. */
-function getWalletAddress(user: ReturnType<typeof usePrivy>['user']): string | null {
-  if (!user) return null;
-  // Prefer a Solana wallet
-  const solana = user.linkedAccounts?.find(
-    (a) => a.type === 'wallet' && (a as { chainType?: string }).chainType === 'solana'
-  ) as { address?: string } | undefined;
-  if (solana?.address) return solana.address;
-  // Fallback: any linked wallet
-  const any = user.linkedAccounts?.find((a) => a.type === 'wallet') as { address?: string } | undefined;
-  if (any?.address) return any.address;
-  // Fallback: embedded wallet
-  return user.wallet?.address ?? null;
-}
-
 function truncate(addr: string) {
   return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
 }
@@ -30,9 +14,6 @@ function truncate(addr: string) {
 export default function Layout() {
   const location = useLocation();
   const isChatPage = location.pathname === '/chat';
-  const { ready, authenticated, login, logout, user } = usePrivy();
-
-  const walletAddress = getWalletAddress(user);
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#0a0a0a' }}>
@@ -70,35 +51,14 @@ export default function Layout() {
             ))}
           </nav>
 
-          {/* Wallet button(s) */}
-          {!ready ? (
-            // Privy still loading — render a ghost placeholder to prevent layout shift
-            <div className="h-9 w-36 rounded-full animate-pulse" style={{ background: '#1e1e1e' }} />
-          ) : authenticated && walletAddress ? (
-            <div className="flex items-center gap-2">
-              <span
-                className="hidden sm:block text-xs font-mono px-3 py-1.5 rounded-full border"
-                style={{ color: '#00ff85', borderColor: '#00ff8530', background: '#00ff8510' }}
-              >
-                {truncate(walletAddress)}
-              </span>
-              <button
-                onClick={logout}
-                className="px-4 py-2 rounded-full text-sm font-bold border transition-colors hover:bg-white/5"
-                style={{ borderColor: '#1e1e1e', color: '#888888' }}
-              >
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={login}
-              className="px-5 py-2 rounded-full text-sm font-bold transition-opacity hover:opacity-90"
-              style={{ background: '#00ff85', color: '#000000' }}
-            >
-              Connect Wallet
-            </button>
-          )}
+          {/* Wallet button */}
+          <button
+            onClick={() => alert('Wallet connection available in full version')}
+            className="px-5 py-2 rounded-full text-sm font-bold transition-opacity hover:opacity-90"
+            style={{ background: '#00ff85', color: '#000000' }}
+          >
+            Connect Wallet
+          </button>
         </div>
       </header>
 
@@ -107,7 +67,7 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      {/* Footer — mock mode note */}
+      {/* Footer */}
       <footer
         className="border-t py-3 text-center"
         style={{ borderColor: '#1e1e1e', background: '#0a0a0a' }}

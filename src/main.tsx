@@ -1,15 +1,14 @@
 import { StrictMode, Component } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { PrivyProvider } from '@privy-io/react-auth';
 import './index.css';
 import App from './App.tsx';
 
 window.addEventListener('unhandledrejection', (e) => {
   console.error('Unhandled promise rejection:', e.reason);
 });
-window.onerror = (msg, src, line, col, err) => {
-  console.error('Global error:', msg, err);
+window.onerror = (_msg, _src, _line, _col, err) => {
+  console.error('Global error:', err);
 };
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -38,33 +37,10 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
-const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID as string;
-
-if (!PRIVY_APP_ID) {
-  console.warn(
-    '[Privy] VITE_PRIVY_APP_ID is not set. ' +
-    'Get a free App ID at dashboard.privy.io and add it to .env'
-  );
-}
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <PrivyProvider
-        appId={PRIVY_APP_ID || 'placeholder-set-vite-privy-app-id'}
-        config={{
-          loginMethods: ['wallet', 'email'],
-          appearance: {
-            theme: 'dark',
-            accentColor: '#00ff85',
-            logo: `${window.location.origin}/logo.svg`,
-            landingHeader: 'Connect to LP Advisor',
-            loginMessage: 'Select a wallet or sign in with email to continue',
-          },
-        }}
-      >
-        <App />
-      </PrivyProvider>
+      <App />
     </ErrorBoundary>
   </StrictMode>,
 );

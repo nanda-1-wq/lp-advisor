@@ -1,21 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { History as HistoryIcon } from 'lucide-react';
-import { usePrivy } from '@privy-io/react-auth';
 import { getHistoricalPositions } from '../lib/api';
 import type { HistoricalPosition } from '../lib/types';
 import { getClosedPositions, getClosedAddresses } from '../lib/pendingPositions';
-
-function getConnectedWallet(user: ReturnType<typeof usePrivy>['user']): string | null {
-  if (!user) return null;
-  const solana = user.linkedAccounts?.find(
-    (a) => a.type === 'wallet' && (a as { chainType?: string }).chainType === 'solana'
-  ) as { address?: string } | undefined;
-  if (solana?.address) return solana.address;
-  const any = user.linkedAccounts?.find((a) => a.type === 'wallet') as { address?: string } | undefined;
-  if (any?.address) return any.address;
-  return user.wallet?.address ?? null;
-}
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -51,9 +39,6 @@ function ReturnCell({ pct, usd }: { pct: number; usd: number }) {
 export default function History() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { authenticated, user } = usePrivy();
-  const connectedWallet = getConnectedWallet(user);
-
   const [wallet, setWallet] = useState(searchParams.get('wallet') ?? '');
   const [inputWallet, setInputWallet] = useState(wallet);
   const [positions, setPositions] = useState<HistoricalPosition[]>([]);
@@ -62,15 +47,6 @@ export default function History() {
   const [error, setError] = useState('');
   const [sortBy, setSortBy] = useState<'closedAt' | 'totalReturnUSD' | 'durationDays'>('closedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-
-  // Auto-fill when wallet connects
-  useEffect(() => {
-    if (authenticated && connectedWallet && !wallet) {
-      setInputWallet(connectedWallet);
-      setWallet(connectedWallet);
-      navigate(`/history?wallet=${encodeURIComponent(connectedWallet)}`, { replace: true });
-    }
-  }, [authenticated, connectedWallet]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadHistory(w: string) {
     if (!w.trim()) return;
@@ -152,9 +128,7 @@ export default function History() {
       <div className="mb-8">
         <h1 className="text-2xl font-black text-white mb-1">Position History</h1>
         <p className="text-sm mb-5" style={{ color: '#888888' }}>
-          {authenticated && connectedWallet
-            ? 'Showing closed positions for your connected wallet.'
-            : 'All closed LP positions for a wallet.'}
+          All closed LP positions for a wallet.
         </p>
         <form onSubmit={handleSubmit} className="flex gap-2 w-full">
           <input

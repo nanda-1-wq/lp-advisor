@@ -4,7 +4,6 @@ import {
   Wallet, AlertTriangle, Copy, RefreshCw, Check,
   LayoutGrid, Table2,
 } from 'lucide-react';
-import { usePrivy } from '@privy-io/react-auth';
 import { getOpenPositions, getPortfolioOverview, getHistoricalPositions } from '../lib/api';
 import type { Position, HistoricalPosition, PortfolioOverview } from '../lib/types';
 import { getPendingPositions, getPendingAddresses } from '../lib/pendingPositions';
@@ -50,16 +49,6 @@ class PortfolioErrorBoundary extends Component<
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getConnectedWallet(user: ReturnType<typeof usePrivy>['user']): string | null {
-  if (!user) return null;
-  const solana = user.linkedAccounts?.find(
-    (a) => a.type === 'wallet' && (a as { chainType?: string }).chainType === 'solana'
-  ) as { address?: string } | undefined;
-  if (solana?.address) return solana.address;
-  const any = user.linkedAccounts?.find((a) => a.type === 'wallet') as { address?: string } | undefined;
-  if (any?.address) return any.address;
-  return user.wallet?.address ?? null;
-}
 
 function fmt(n: unknown): string {
   const num = typeof n === 'number' && isFinite(n) ? n : 0;
@@ -461,9 +450,6 @@ function HistoricalTable({ positions }: { positions: HistoricalPosition[] }) {
 function PortfolioInner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { authenticated, user } = usePrivy();
-  const connectedWallet = getConnectedWallet(user);
-
   const [wallet, setWallet] = useState(searchParams.get('wallet') ?? '');
   const [inputWallet, setInputWallet] = useState(wallet);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -475,15 +461,6 @@ function PortfolioInner() {
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [copied, setCopied] = useState(false);
-
-  // Auto-fill when wallet connects
-  useEffect(() => {
-    if (authenticated && connectedWallet && !wallet) {
-      setInputWallet(connectedWallet);
-      setWallet(connectedWallet);
-      navigate(`/portfolio?wallet=${encodeURIComponent(connectedWallet)}`, { replace: true });
-    }
-  }, [authenticated, connectedWallet]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadAll(w: string) {
     if (!w.trim()) return;
