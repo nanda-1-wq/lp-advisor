@@ -7,9 +7,6 @@ const NAV = [
   { to: '/history', label: 'History' },
 ];
 
-function truncate(addr: string) {
-  return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
-}
 
 export default function Layout() {
   const location = useLocation();
